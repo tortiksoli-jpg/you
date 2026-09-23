@@ -178,10 +178,89 @@ function magnifier(ctx) {
   const flip = G.node('flip', [body]);
   flip.position.set(0, 17, -17);
   body.position.set(0, -17, 17);
-  return { root: G.node('mag3x', [k.build(), flip]), sight: { y: A, z: 0, x0: -56, x1: 54, r: 12, mag: 3, eyeRelief: 70, magnifier: true, lens: lensM }, flipAside: { node: flip, angle: -88 } };
+  return { root: G.node('mag3x', [k.build(), flip]), sight: { y: A, z: 0, x0: -56, x1: 54, r: 12, mag: 3, eyeRelief: 70, magnifier: true, suffix: ' + 3×', lens: lensM }, flipAside: { node: flip, angle: -88 } };
 }
 
 /* ------------------------------------------------- Magpul MBUS (складные) */
+
+/* -------------------------------------- Trijicon RMR Type 2 на 45° кронштейне */
+
+// Корпус RMR: начало — центр нижней плоскости, ось прицеливания на высоте 15 мм.
+function rmrBody(ctx, k) {
+  const A = 15;
+  k.add('alu', G.extrudeX(G.rrect(0, 4.5, 25, 9, 2.2), -22, 23, { bevel: 1.2 }));
+  // задний отсек (светодиод, электроника) — ниже оси, чтобы не заслонять окно
+  k.add('alu', G.extrudeZ([[-22, 8], [-6, 8], [-6, 10.5, 1.5], [-10, 11.5, 2], [-22, 11, 2]], 23, { bevel: 1.2 }));
+  // «рога» — защитный козырёк окна
+  const arch = (w, h, y0) => {
+    const pts = [[w, y0]];
+    for (let i = 0; i <= 12; i++) { const a = (i / 12) * Math.PI; pts.push([Math.cos(a) * w, h - w * 0.55 + Math.sin(a) * w * 0.55]); }
+    pts.push([-w, y0]);
+    return pts;
+  };
+  const hood = G.shape(arch(12.7, 25.4, 7), [arch(9.6, 22.4, 8.6)]);
+  k.add('alu', G.extrudeX(hood, -3, 15, { bevel: 1 }));
+  // кнопки яркости на бортах и винты выверки
+  for (const s of [-1, 1]) k.add('rubber', G.T(G.cylZ(3.2, 0, 1.6, { c: 0.6, seg: 16 }), { p: [-15, 10, s * 12.4], r: s < 0 ? [0, 180, 0] : [0, 0, 0] }));
+  k.add('steel', G.T(G.cylY(2.6, 10.5, 12, { seg: 14 }), { p: [-16, 0, 0] }));
+  k.add('steel', G.T(G.cylZ(2.6, 12.5, 13.8, { seg: 14 }), { p: [-2, 12, 0] }));
+  return A;
+}
+
+function rmrOffset(ctx) {
+  const k = ctx.kit(), m = ctx.kit();
+  // башмак на планке и рычаг, уходящий вправо-вверх
+  k.add('alu', clampBody(-12, 12, 5, { w: 24 }));
+  k.add('steel', crossBolt(0));
+  k.add('alu', G.extrudeX([[-12, 3, 1], [12, 3, 1], [30, 14, 3], [26, 21, 3], [6, 12, 3], [-12, 8, 2]], -12, 12, { bevel: 1.2 }));
+  // наклонная площадка 45° с RMR (правый борт: +Z)
+  m.add('alu', G.extrudeX(G.rrect(0, -1.5, 27, 5, 1.5), -23, 24, { bevel: 0.8 }));
+  const A = rmrBody(ctx, m);
+  const glass = lens(ctx, G.extrudeX(G.shape(G.rrect(0, A + 0.5, 18.6, 13.4, 5)), 6, 7, { bevel: 0.2 }), 'glassAmber');
+  const cant = G.node('rmrCant', [m.build(), glass]);
+  cant.position.set(0, 16.5, 22);
+  cant.rotation.x = Math.PI / 4;
+  return {
+    root: G.node('rmr_offset', [k.build(), cant]),
+    // прицельная ось задана в системе наклонной площадки: при прицеливании оружие заваливается на 45°
+    sight: { node: cant, y: A, z: 0, x0: -22, x1: 15, r: 9, mag: 1, reticle: 'dot', lens: glass },
+  };
+}
+
+/* ------------------------------------ AN/PVS-14 на откидном кронштейне */
+
+function pvs14(ctx) {
+  const k = ctx.kit(), f = ctx.kit();
+  const A = 39;
+  k.add('alu', clampBody(-16, 16, 6));
+  k.add('steel', crossBolt(0));
+  k.add('alu', G.extrudeX([[-18, 5, 2], [-6, 5, 2], [-6, 14, 3], [-18, 14, 3]], -15, 15, { bevel: 1 }));
+  k.add('steel', G.cylX(3.6, -17, 17, { seg: 16 }), { p: [0, 11, -15] });
+  // откидная часть: башмак-«ласточкин хвост» и монокуляр
+  f.add('alu', G.extrudeX(G.shape([[-17, 8, 2], [-9, 7, 2], [0, 12, 2], [10, 12, 2], [10, 16, 2], [-17, 16, 2]]), -14, 14, { bevel: 1 }));
+  f.add('poly', G.T(G.extrudeX(G.shape(G.rrect(0, 0, 36, 12, 3)), -26, 16, { bevel: 1.5 }), { p: [0, 20, 0] }));
+  const at = (g) => g.translate(0, A, 0);
+  // корпус, окуляр с наглазником, объектив с кольцом фокусировки; полые — изображение ЭОП
+  // имитируется фильтром экрана, а взгляд проходит насквозь
+  f.add('poly', at(hollowLathe([[-34, 17], [-30, 20], [22, 20], [26, 17.5]], 13, { seg: 40 })));
+  f.add('poly', at(hollowLathe([[-62, 16.5], [-34, 16.5]], 13, { seg: 36 })));
+  f.add('rubber', at(G.flutesX(16.5, -58, -40, 24, 1.6, 0.9)));
+  f.add('rubber', at(hollowLathe([[-86, 20.5], [-80, 21.5], [-64, 18.5], [-62, 17]], 15, { seg: 40 })));
+  f.add('poly', at(hollowLathe([[26, 19.5], [58, 19.5], [60, 18]], 15, { seg: 40 })));
+  f.add('rubber', at(G.flutesX(19.5, 30, 54, 28, 1.8, 1)));
+  f.add('lensBlack', at(G.tubeX(15, 13.6, 52, 60.2, { seg: 32 })));
+  // батарейный отсек (AA) слева и ручка включения/усиления
+  f.add('poly', G.T(G.cylZ(10, -36, -18, { c: 1, seg: 28 }), { p: [0, A + 4, 0] }));
+  f.add('poly', G.T(ctx.C.knob(10.6, 5, 24), { r: [0, 90, 0], p: [0, A + 4, -36] }));
+  f.add('poly', G.T(ctx.C.knob(8, 7, 12), { r: [0, 90, 0], p: [-22, A, -19] }));
+  const lensO = lens(ctx, ctx.C.lensDisc(13.8, 56).translate(0, A, 0), 'glassBlue');
+  const lensE = lens(ctx, ctx.C.lensDisc(14, -64).translate(0, A, 0), 'glassRed');
+  const body = G.node('pvsBody', [f.build(), lensO, lensE]);
+  const flip = G.node('flip', [body]);
+  flip.position.set(0, 11, -15);
+  body.position.set(0, -11, 15);
+  return { root: G.node('pvs14', [k.build(), flip]), sight: { y: A, z: 0, x0: -86, x1: 60, r: 14, mag: 1, eyeRelief: 22, magnifier: true, nv: true, suffix: ' + PVS-14', lens: lensE }, flipAside: { node: flip, angle: -95 } };
+}
 
 function mbusRear(ctx) {
   const k = ctx.kit(), f = ctx.kit();
@@ -230,6 +309,8 @@ export const OPTICS = [
   { id: 'acog', cat: 'optic', name: 'Trijicon ACOG TA31 4×32', desc: 'Призменный 4×, шеврон с дальномерной шкалой', foot: [-32, 32], body: [-75, 76], stats: { weight: 480, ergo: -6, adsTime: 40 }, build: acog },
   { id: 'lpvo', cat: 'optic', name: 'Прицел 1–6×24', desc: 'Переменная кратность, колёсико — зум в прицеле', foot: [-38, 34], body: [-132, 106], stats: { weight: 720, ergo: -9, adsTime: 55 }, build: lpvo },
   { id: 'mag3x', cat: 'magnifier', name: 'Aimpoint 3XMag-1 + FTS', desc: 'Увеличитель 3×, откидывается вбок', foot: [-16, 16], body: [-57, 55], needs: mag1x39, stats: { weight: 330, ergo: -4, adsTime: 20 }, build: magnifier },
+  { id: 'pvs14', cat: 'magnifier', name: 'Монокуляр AN/PVS-14', desc: 'ПНВ за коллиматором на откидном кронштейне (N — откинуть)', foot: [-16, 16], body: [-86, 60], needs: mag1x39, stats: { weight: 420, ergo: -6, adsTime: 25 }, build: pvs14 },
+  { id: 'rmr_off', cat: 'offset', name: 'Trijicon RMR на 45° кронштейне', desc: 'Мини-коллиматор сбоку для ближнего боя: V — переключиться, оружие заваливается', foot: [-12, 12], body: [-23, 24], stats: { weight: 95, ergo: -1 }, build: rmrOffset },
   { id: 'mbus_rear', cat: 'rearsight', name: 'Magpul MBUS (целик)', desc: 'Складной диоптр, полимер', foot: [-13, 13], body: [-13, 13], stats: { weight: 34 }, build: mbusRear },
   { id: 'mbus_front', cat: 'frontsight', name: 'Magpul MBUS (мушка)', desc: 'Складная мушка, полимер', foot: [-13, 13], body: [-13, 13], stats: { weight: 26 }, build: mbusFront },
 ];

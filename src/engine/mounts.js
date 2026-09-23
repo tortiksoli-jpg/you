@@ -119,6 +119,22 @@ export class Assembler {
     return out.map((p) => ({ ...p, clash: p.x + body[1] > limit + 0.5 ? 'перед прицелом' : this.clash(p, body, ignoreSlot, slot) }));
   }
 
+  // Модулю «позади прицела» не хватает места: ищем ближайшую позицию прицела
+  // дальше вперёд, при которой он встаёт. Возвращает эту позицию или null.
+  roomBehind(slot, part) {
+    const tgt = slot.behind && this.installed.get(slot.behind);
+    if (!tgt?.railPos) return null;
+    const save = tgt.railPos;
+    const cands = this.railPositions(tgt.slot, tgt.part, tgt.slot.id).filter((p) => !p.clash && p.x > save.x);
+    let found = null;
+    for (const c of cands) {
+      tgt.railPos = c;
+      if (this.railPositions(slot, part, slot.id).some((p) => !p.clash)) { found = c; break; }
+    }
+    tgt.railPos = save;
+    return found;
+  }
+
   clash(p, body, ignoreSlot, slot) {
     const x0 = p.x + body[0], x1 = p.x + body[1];
     for (const [sid, it] of this.installed) {

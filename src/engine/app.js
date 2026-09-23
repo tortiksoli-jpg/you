@@ -11,6 +11,7 @@ import { reticleMesh } from './reticle.js';
 import { UI } from './ui.js';
 
 const D2R = Math.PI / 180;
+const Y_UP = new THREE.Vector3(0, 1, 0);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
 const ease = (t) => t * t * (3 - 2 * t);
@@ -104,7 +105,7 @@ export async function boot(def, lib) {
       m.stencilWrite = true; m.stencilRef = ref; m.stencilFunc = THREE.AlwaysStencilFunc;
       m.stencilZPass = THREE.ReplaceStencilOp;
       s.lens.userData.stencilSet = true;
-      if (s.reticle) it.obj.add(reticleMesh(s.reticle, s, ref));
+      if (s.reticle) (s.node || it.obj).add(reticleMesh(s.reticle, s, ref));
     }
     // откидные механические при наличии оптики
     const hasOptic = !!asm.info('optic')?.sight;
@@ -141,10 +142,11 @@ export async function boot(def, lib) {
     sights = [];
     const m = new THREE.Matrix4();
     const push = (id, label, obj, s) => {
-      m.copy(toRoot(obj, gun));
+      m.copy(toRoot(s.node || obj, gun));
       const eye = new THREE.Vector3(s.x0 ?? 0, s.y, s.z || 0).applyMatrix4(m);
       const dir = new THREE.Vector3(1, 0, 0).transformDirection(m);
-      sights.push({ id, label, eye, dir, mag: s.mag || 1, zoom: s.zoom, reticle: s.reticle, eyeRelief: s.eyeRelief, magnifier: s.magnifier, x0: eye.x });
+      const up = new THREE.Vector3(0, 1, 0).transformDirection(m);
+      sights.push({ id, label, eye, dir, up, mag: s.mag || 1, zoom: s.zoom, reticle: s.reticle, eyeRelief: s.eyeRelief, magnifier: s.magnifier, x0: eye.x });
     };
     const opt = asm.installed.get('optic');
     if (opt?.info?.sight) push('optic', opt.part.name, opt.obj, opt.info.sight);
@@ -153,7 +155,7 @@ export async function boot(def, lib) {
     if (mg?.info?.sight && sights[0]) {
       m.copy(toRoot(mg.obj, gun));
       const eye = new THREE.Vector3(mg.info.sight.x0, mg.info.sight.y, 0).applyMatrix4(m);
-      sights.splice(1, 0, { ...sights[0], id: 'magnifier', label: sights[0].label + ' + 3×', eye, mag: mg.info.sight.mag, eyeRelief: mg.info.sight.eyeRelief, withMag: true });
+      sights.splice(1, 0, { ...sights[0], id: 'magnifier', label: sights[0].label + (mg.info.sight.suffix || ''), eye, mag: mg.info.sight.mag, eyeRelief: mg.info.sight.eyeRelief, nv: !!mg.info.sight.nv, withMag: mg.info.sight.mag > 1 });
     }
     // механика: целик + мушка
     let rear = null, front = null;
@@ -206,8 +208,11 @@ export async function boot(def, lib) {
     const eyeGun = s.eye.clone().addScaledVector(s.dir, t);
     const m = new THREE.Matrix4().makeScale(0.001, 0.001, 0.001);
     out.pos.copy(eyeGun).applyMatrix4(m);
-    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), s.dir);
-    out.quat.copy(q);
+    // базис камеры: вперёд — ось прицела, верх — «верх» прицела (у бокового RMR оружие заваливается)
+    const right = new THREE.Vector3().crossVectors(s.dir, s.up || Y_UP).normalize();
+    const up = new THREE.Vector3().crossVectors(right, s.dir);
+    const back = s.dir.clone().negate();
+    out.quat.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, back));
     const mag = s.zoom ? st.zoom : s.mag;
     out.fov = s.irons ? baseFov * 0.78 : baseFov / Math.max(1, mag) * (mag > 1 ? 1 : 0.88);
     out.mag = mag;
@@ -487,6 +492,13 @@ export async function boot(def, lib) {
   // ---------------------------------------------------- изменение модулей
   function setPart(slotId, partId, pos) {
     const next = { ...cfg, [slotId]: partId ? { id: partId, pos: pos ?? (cfg[slotId]?.id === partId ? cfg[slotId].pos : null) } : null };
+    // увеличитель/ПНВ: при нехватке места сдвигаем прицел вперёд
+    const slotDef = def.slots.find((s) => s.id === slotId);
+    const newPart = partId && asm.part(partId);
+    if (newPart && slotDef?.behind && !asm.railPositions(slotDef, newPart, slotId).some((p) => !p.clash)) {
+      const room = asm.roomBehind(slotDef, newPart);
+      if (room) next[slotDef.behind] = { id: cfg[slotDef.behind].id, pos: { rail: room.rail, i: room.i } };
+    }
     const before = JSON.stringify(cfg);
     applyConfig(next);
     const part = partId && asm.part(partId);
@@ -658,7 +670,10 @@ export async function boot(def, lib) {
       st.yaw = lerp(st.yaw, 0, 1 - Math.pow(0.01, dt));
       st.pitch = lerp(st.pitch, 0, 1 - Math.pow(0.01, dt));
     }
-    aim.rotation.set(0, st.yaw, st.pitch + st.climb, 'YZX');
+    // боковой прицел: стрелок заваливает оружие, горизонт остаётся ровным
+    const cs = sights[st.sightIdx];
+    const cant = st.adsT > 0 && cs?.up ? -Math.atan2(cs.up.z, cs.up.y) * ease(st.adsT) : 0;
+    aim.rotation.set(cant, st.yaw, st.pitch + st.climb, 'YZX');
     // модель отдачи: поворот вокруг плеча + отход назад
     rig.position.set(-r.z * 0.001 * 12 + pivotX * 0, 0, 0);
     rig.rotation.set(0, r.y * D2R * 0.6, r.p * D2R * 0.5);
@@ -685,6 +700,7 @@ export async function boot(def, lib) {
         const magnified = p.mag > 1.5 && st.adsT > 0.92;
         gun.visible = !magnified;
         ui?.scope(magnified ? p : null, st.adsT > 0.92 ? p : null);
+        ui?.nv(!!p.s.nv && !st.magAside && st.adsT > 0.85);
       }
       if (!st.ads && st.adsT === 0) { controls.enabled = true; }
     } else {
@@ -694,6 +710,7 @@ export async function boot(def, lib) {
       st.viewOff = lerp(st.viewOff || 0, off, 1 - Math.pow(0.01, dt));
       gun.visible = true;
       ui?.scope(null, null);
+      ui?.nv(false);
       controls.enabled = true;
       controls.target.lerp(focusTarget, 1 - Math.pow(0.02, dt));
       if (focusDist) {

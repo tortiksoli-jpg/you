@@ -14,6 +14,8 @@ const MUZ = {
   bare: { blast: 1.1, lp: 1.1, body: 1.0, crack: 1.0, wet: 1.0, attack: 0.0006, tail: 1.0, harsh: 0.15 },
   fh: { blast: 1.0, lp: 0.95, body: 1.0, crack: 1.0, wet: 1.0, attack: 0.0007, tail: 1.0, harsh: 0.1 },
   comp: { blast: 1.2, lp: 1.1, body: 1.05, crack: 1.0, wet: 1.15, attack: 0.0005, tail: 1.1, harsh: 0.35 },
+  // линейный: волна уходит вперёд — глуше и мягче у стрелка, без резкого «треска»
+  linear: { blast: 0.72, lp: 0.7, body: 0.95, crack: 1.0, wet: 0.8, attack: 0.0009, tail: 0.85, harsh: 0 },
   brake: { blast: 1.45, lp: 1.3, body: 1.1, crack: 1.0, wet: 1.35, attack: 0.0004, tail: 1.2, harsh: 0.6 },
   supp: { blast: 0.075, lp: 0.2, body: 0.32, crack: 0.55, wet: 0.22, attack: 0.004, tail: 0.6, harsh: 0 },
 };

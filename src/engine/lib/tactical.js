@@ -64,6 +64,34 @@ function boxLaser(ctx, o) {
 
 /* -------------------------------------------------------- рукоятки */
 
+/* ------------------------------------- Steiner DBAL-PL: фонарь + лазер */
+
+function dbal(ctx) {
+  const k = ctx.kit();
+  const L0 = -40, L1 = 36, W = 34, H = 34;
+  k.add('alu', clampBody(-16, 16, 5));
+  k.add('steel', crossBolt(0));
+  k.add('polyTan', G.extrudeX([[-W / 2, 4, 2], [W / 2, 4, 2], [W / 2, H, 6], [-W / 2, H, 6]], L0, L1 - 8, { bevel: 2.2 }));
+  // головка фонаря снизу-спереди, окно лазера над ней
+  const ly = 15, lr = 11.5;
+  k.add('polyTan', G.T(G.latheX([[L1 - 12, 0], [L1 - 12, lr + 2], [L1 + 4, lr + 3.4], [L1 + 6, lr + 2.6], [L1 + 6, 0]], { seg: 36 }), { p: [0, ly, 0] }));
+  k.add('steel', G.T(G.tubeX(lr + 2.7, lr, L1 + 5, L1 + 7, { seg: 36 }), { p: [0, ly, 0] }));
+  const vy = H - 6;
+  k.add('polyTan', G.extrudeX(G.rrect(0, vy, 18, 10, 3), L1 - 10, L1 + 2, { bevel: 1 }));
+  k.add('lensBlack', G.extrudeX(G.rrect(0, vy, 14, 6.5, 2), L1 + 1.6, L1 + 2.4, { bevel: 0.2 }));
+  // выносная кнопка, переключатель режимов, винты выверки
+  k.add('rubber', G.T(G.cylY(4.6, H - 1, H + 2.6, { c: 1, seg: 18 }), { p: [L0 + 14, 0, 0] }));
+  k.add('polyTan', G.T(ctx.C.knob(7, 5, 16), { r: [0, 0, 90], p: [L0 + 30, H - 1, 0] }));
+  for (const z of [-7, 7]) k.add('steel', G.T(G.cylY(2.4, H - 1, H + 0.8, { seg: 12 }), { p: [L1 - 18, 0, z] }));
+  const root = G.node('dbal', [k.build()]);
+  const le = lens(ctx, G.cylX(lr - 0.1, L1 + 5.2, L1 + 5.8, { seg: 32 }).translate(0, ly, 0), 'lampLens');
+  le.renderOrder = 0; le.material.transparent = false;
+  const ll = lens(ctx, G.cylX(2.4, L1 + 2.3, L1 + 2.8, { seg: 16 }).translate(0, vy, 3), 'laserLens');
+  ll.renderOrder = 0; ll.material.transparent = false;
+  root.add(le, ll);
+  return { root, light: { p: [L1 + 7, ly, 0], lens: le, lumens: 300 }, laser: { p: [L1 + 3, vy, 3], lens: ll } };
+}
+
 function vgrip(ctx, o) {
   const k = ctx.kit();
   const L = o.len, d = o.d;
@@ -138,6 +166,7 @@ export const TACTICAL = [
   { id: 'peq15', cat: 'laser', name: 'L3 AN/PEQ-15', desc: 'ЛЦУ: видимый + ИК лазер, ИК-осветитель', foot: [-18, 18], body: [-48, 60], stats: { weight: 215, ergo: -3, 'hipSpread%': -18 }, build: (c) => boxLaser(c, { name: 'peq15', L0: -48, L1: 56, H: 38, W: 50, mat: 'polyTan', illum: 8 }) },
   { id: 'ls321', cat: 'laser', name: 'Holosun LS321', desc: 'Компактный ЛЦУ с ИК-осветителем', foot: [-18, 18], body: [-34, 46], stats: { weight: 140, ergo: -2, 'hipSpread%': -15 }, build: (c) => boxLaser(c, { name: 'ls321', L0: -34, L1: 44, H: 32, W: 36, mat: 'poly', illum: 6 }) },
 
+  { id: 'dbal', cat: 'combo', name: 'Steiner DBAL-PL', desc: 'Комбо-блок: фонарь 300 лм + видимый лазер (C / Z)', foot: [-16, 16], body: [-42, 44], stats: { weight: 150, ergo: -2, 'hipSpread%': -12 }, build: dbal },
   { id: 'rvg', cat: 'foregrip', name: 'Magpul RVG', desc: 'Вертикальная рукоятка, контроль отдачи', foot: [-17, 17], body: [-17, 17], stats: { weight: 70, 'recoilV%': -6, 'recoilH%': -10, ergo: 3, adsTime: 6 }, build: (c) => vgrip(c, { name: 'rvg', len: 98, d: 32, ribs: true }) },
   { id: 'bcm_vg', cat: 'foregrip', name: 'BCM Gunfighter Mod 3', desc: 'Короткая рукоятка-упор', foot: [-16, 16], body: [-16, 16], stats: { weight: 45, 'recoilV%': -4, 'recoilH%': -6, ergo: 5 }, build: (c) => vgrip(c, { name: 'bcm', len: 62, d: 31, flat: 0.85 }) },
   { id: 'afg2', cat: 'foregrip', name: 'Magpul AFG-2', desc: 'Наклонная рукоятка, быстрая вскидка', foot: [-64, 34], body: [-66, 34], stats: { weight: 55, 'recoilV%': -3, 'recoilH%': -5, ergo: 6, adsTime: -8 }, build: afg },

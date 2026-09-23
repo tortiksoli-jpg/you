@@ -65,10 +65,11 @@ export class UI {
     this.toastEl = el('div', 'toast');
     this.tipEl = el('div', 'tip');
     this.scopeEl = el('div', 'scope', '<div class="s-ret"></div>');
+    this.nvEl = el('div', 'nv-ov');
     this.adsHint = el('div', 'ads-hint');
     const bottom = el('div', 'bottom');
     bottom.append(this.ammo, this.bar, modsToggle, this.helpBtn);
-    root.append(left, this.mods, bottom, this.help, this.toastEl, this.tipEl, this.scopeEl, this.adsHint);
+    root.append(left, this.mods, bottom, this.help, this.toastEl, this.tipEl, this.nvEl, this.scopeEl, this.adsHint);
     this.buildBar();
     if (innerWidth > 900) root.classList.add('show-mods');
   }
@@ -114,13 +115,13 @@ export class UI {
   canPut(slot, part) {
     const asm = this.app.asm, cfg = this.app.cfg;
     if (part.needs && !part.needs(cfg, asm)) {
-      if (part.cat === 'magnifier') return 'нужен коллиматор с осью 39 мм';
+      if (part.cat === 'magnifier') return 'нужен коллиматор 1× с осью 39 мм';
       return 'несовместимо с текущей сборкой';
     }
     if (slot.rails) {
       const ps = asm.railPositions(slot, part, slot.id);
       if (!ps.length) return part.mountTypes?.includes('dovetail') ? 'нужен «ласточкин хвост»' : 'нет подходящей планки';
-      if (!ps.some((p) => !p.clash)) return 'мешает: ' + ps[0].clash;
+      if (!ps.some((p) => !p.clash) && !asm.roomBehind(slot, part)) return 'мешает: ' + ps[0].clash;
     }
     return null;
   }
@@ -223,7 +224,9 @@ export class UI {
     B.ads.classList.toggle('on', st.ads);
     const multi = a.sights.length > 1;
     B.sight.hidden = !multi;
-    B.mag3.hidden = !a.asm.installed.get('magnifier');
+    const mgPart = a.asm.installed.get('magnifier');
+    B.mag3.hidden = !mgPart;
+    if (mgPart) B.mag3.textContent = mgPart.info?.sight?.nv ? 'ПНВ' : 'Увеличитель';
     B.mag3.classList.toggle('on', !st.magAside);
     B.light.hidden = !a.asm.withInfo('light').length;
     B.light.classList.toggle('on', st.light);
@@ -241,6 +244,13 @@ export class UI {
     this.adsHint.classList.toggle('on', !!(st.ads && s));
     this.root.classList.toggle('ads', st.ads);
     if (this.lastStats !== st.stats) { this.lastStats = st.stats; this.renderStats(); }
+  }
+
+  // Ночной монокуляр: зелёный люминофор, круглое поле зрения.
+  nv(on) {
+    if (on === this.nvOn) return;
+    this.nvOn = on;
+    document.body.classList.toggle('nv', on);
   }
 
   scope(mag, ads) {

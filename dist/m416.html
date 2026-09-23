@@ -128,6 +128,10 @@ body.noui .ui{display:none}
 .scope{position:fixed;inset:0;pointer-events:none;display:none;
   background:radial-gradient(circle at 50% 50%, transparent 0, transparent calc(min(42vw,42vh) - 6px), rgba(0,0,0,.55) calc(min(42vw,42vh) - 2px), #000 min(42vw,42vh))}
 .scope.on{display:block}
+.nv-ov{position:fixed;inset:0;pointer-events:none;display:none;
+  background:radial-gradient(circle at 50% 50%, transparent 0, transparent calc(min(40vw,40vh) - 18px), rgba(0,8,0,.7) calc(min(40vw,40vh) - 4px), #000 min(40vw,40vh))}
+body.nv .nv-ov{display:block}
+body.nv canvas{filter:grayscale(1) sepia(1) hue-rotate(52deg) saturate(3.2) brightness(1.45) contrast(1.25)}
 .s-ret{position:absolute;left:50%;top:50%;width:calc(min(84vw,84vh));height:calc(min(84vw,84vh));transform:translate(-50%,-50%)}
 .s-ret svg{width:100%;height:100%}
 
@@ -1300,6 +1304,24 @@ var Assembler = class _Assembler {
     }
     return out.map((p) => ({ ...p, clash: p.x + body[1] > limit + 0.5 ? "перед прицелом" : this.clash(p, body, ignoreSlot, slot2) }));
   }
+  // Модулю «позади прицела» не хватает места: ищем ближайшую позицию прицела
+  // дальше вперёд, при которой он встаёт. Возвращает эту позицию или null.
+  roomBehind(slot2, part) {
+    const tgt = slot2.behind && this.installed.get(slot2.behind);
+    if (!tgt?.railPos) return null;
+    const save = tgt.railPos;
+    const cands = this.railPositions(tgt.slot, tgt.part, tgt.slot.id).filter((p) => !p.clash && p.x > save.x);
+    let found = null;
+    for (const c of cands) {
+      tgt.railPos = c;
+      if (this.railPositions(slot2, part, slot2.id).some((p) => !p.clash)) {
+        found = c;
+        break;
+      }
+    }
+    tgt.railPos = save;
+    return found;
+  }
   clash(p, body, ignoreSlot, slot2) {
     const x0 = p.x + body[0], x1 = p.x + body[1];
     for (const [sid, it] of this.installed) {
@@ -1458,6 +1480,8 @@ var MUZ = {
   bare: { blast: 1.1, lp: 1.1, body: 1, crack: 1, wet: 1, attack: 6e-4, tail: 1, harsh: 0.15 },
   fh: { blast: 1, lp: 0.95, body: 1, crack: 1, wet: 1, attack: 7e-4, tail: 1, harsh: 0.1 },
   comp: { blast: 1.2, lp: 1.1, body: 1.05, crack: 1, wet: 1.15, attack: 5e-4, tail: 1.1, harsh: 0.35 },
+  // линейный: волна уходит вперёд — глуше и мягче у стрелка, без резкого «треска»
+  linear: { blast: 0.72, lp: 0.7, body: 0.95, crack: 1, wet: 0.8, attack: 9e-4, tail: 0.85, harsh: 0 },
   brake: { blast: 1.45, lp: 1.3, body: 1.1, crack: 1, wet: 1.35, attack: 4e-4, tail: 1.2, harsh: 0.6 },
   supp: { blast: 0.075, lp: 0.2, body: 0.32, crack: 0.55, wet: 0.22, attack: 4e-3, tail: 0.6, harsh: 0 }
 };
@@ -2440,10 +2464,11 @@ var UI = class {
     this.toastEl = el("div", "toast");
     this.tipEl = el("div", "tip");
     this.scopeEl = el("div", "scope", '<div class="s-ret"></div>');
+    this.nvEl = el("div", "nv-ov");
     this.adsHint = el("div", "ads-hint");
     const bottom = el("div", "bottom");
     bottom.append(this.ammo, this.bar, modsToggle, this.helpBtn);
-    root.append(left, this.mods, bottom, this.help, this.toastEl, this.tipEl, this.scopeEl, this.adsHint);
+    root.append(left, this.mods, bottom, this.help, this.toastEl, this.tipEl, this.nvEl, this.scopeEl, this.adsHint);
     this.buildBar();
     if (innerWidth > 900) root.classList.add("show-mods");
   }
@@ -2496,13 +2521,13 @@ var UI = class {
   canPut(slot2, part) {
     const asm = this.app.asm, cfg = this.app.cfg;
     if (part.needs && !part.needs(cfg, asm)) {
-      if (part.cat === "magnifier") return "нужен коллиматор с осью 39 мм";
+      if (part.cat === "magnifier") return "нужен коллиматор 1× с осью 39 мм";
       return "несовместимо с текущей сборкой";
     }
     if (slot2.rails) {
       const ps = asm.railPositions(slot2, part, slot2.id);
       if (!ps.length) return part.mountTypes?.includes("dovetail") ? "нужен «ласточкин хвост»" : "нет подходящей планки";
-      if (!ps.some((p) => !p.clash)) return "мешает: " + ps[0].clash;
+      if (!ps.some((p) => !p.clash) && !asm.roomBehind(slot2, part)) return "мешает: " + ps[0].clash;
     }
     return null;
   }
@@ -2611,7 +2636,9 @@ var UI = class {
     B.ads.classList.toggle("on", st.ads);
     const multi = a.sights.length > 1;
     B.sight.hidden = !multi;
-    B.mag3.hidden = !a.asm.installed.get("magnifier");
+    const mgPart = a.asm.installed.get("magnifier");
+    B.mag3.hidden = !mgPart;
+    if (mgPart) B.mag3.textContent = mgPart.info?.sight?.nv ? "ПНВ" : "Увеличитель";
     B.mag3.classList.toggle("on", !st.magAside);
     B.light.hidden = !a.asm.withInfo("light").length;
     B.light.classList.toggle("on", st.light);
@@ -2632,6 +2659,12 @@ var UI = class {
       this.lastStats = st.stats;
       this.renderStats();
     }
+  }
+  // Ночной монокуляр: зелёный люминофор, круглое поле зрения.
+  nv(on) {
+    if (on === this.nvOn) return;
+    this.nvOn = on;
+    document.body.classList.toggle("nv", on);
   }
   scope(mag, ads) {
     const on = !!mag;
@@ -2684,6 +2717,7 @@ var UI = class {
 
 // src/engine/app.js
 var D2R2 = Math.PI / 180;
+var Y_UP = new THREE8.Vector3(0, 1, 0);
 var clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 var lerp = (a, b, t) => a + (b - a) * t;
 var ease = (t) => t * t * (3 - 2 * t);
@@ -2796,7 +2830,7 @@ async function boot(def, lib) {
       m.stencilFunc = THREE8.AlwaysStencilFunc;
       m.stencilZPass = THREE8.ReplaceStencilOp;
       s.lens.userData.stencilSet = true;
-      if (s.reticle) it.obj.add(reticleMesh(s.reticle, s, ref));
+      if (s.reticle) (s.node || it.obj).add(reticleMesh(s.reticle, s, ref));
     }
     const hasOptic = !!asm.info("optic")?.sight;
     for (const it of asm.installed.values()) {
@@ -2833,10 +2867,11 @@ async function boot(def, lib) {
     sights = [];
     const m = new THREE8.Matrix4();
     const push = (id, label, obj, s) => {
-      m.copy(toRoot(obj, gun));
+      m.copy(toRoot(s.node || obj, gun));
       const eye = new THREE8.Vector3(s.x0 ?? 0, s.y, s.z || 0).applyMatrix4(m);
       const dir = new THREE8.Vector3(1, 0, 0).transformDirection(m);
-      sights.push({ id, label, eye, dir, mag: s.mag || 1, zoom: s.zoom, reticle: s.reticle, eyeRelief: s.eyeRelief, magnifier: s.magnifier, x0: eye.x });
+      const up = new THREE8.Vector3(0, 1, 0).transformDirection(m);
+      sights.push({ id, label, eye, dir, up, mag: s.mag || 1, zoom: s.zoom, reticle: s.reticle, eyeRelief: s.eyeRelief, magnifier: s.magnifier, x0: eye.x });
     };
     const opt = asm.installed.get("optic");
     if (opt?.info?.sight) push("optic", opt.part.name, opt.obj, opt.info.sight);
@@ -2845,7 +2880,7 @@ async function boot(def, lib) {
     if (mg?.info?.sight && sights[0]) {
       m.copy(toRoot(mg.obj, gun));
       const eye = new THREE8.Vector3(mg.info.sight.x0, mg.info.sight.y, 0).applyMatrix4(m);
-      sights.splice(1, 0, { ...sights[0], id: "magnifier", label: sights[0].label + " + 3×", eye, mag: mg.info.sight.mag, eyeRelief: mg.info.sight.eyeRelief, withMag: true });
+      sights.splice(1, 0, { ...sights[0], id: "magnifier", label: sights[0].label + (mg.info.sight.suffix || ""), eye, mag: mg.info.sight.mag, eyeRelief: mg.info.sight.eyeRelief, nv: !!mg.info.sight.nv, withMag: mg.info.sight.mag > 1 });
     }
     let rear = null, front = null;
     const pts = (it, key) => {
@@ -2898,8 +2933,10 @@ async function boot(def, lib) {
     const eyeGun = s.eye.clone().addScaledVector(s.dir, t);
     const m = new THREE8.Matrix4().makeScale(1e-3, 1e-3, 1e-3);
     out.pos.copy(eyeGun).applyMatrix4(m);
-    const q = new THREE8.Quaternion().setFromUnitVectors(new THREE8.Vector3(0, 0, -1), s.dir);
-    out.quat.copy(q);
+    const right = new THREE8.Vector3().crossVectors(s.dir, s.up || Y_UP).normalize();
+    const up = new THREE8.Vector3().crossVectors(right, s.dir);
+    const back = s.dir.clone().negate();
+    out.quat.setFromRotationMatrix(new THREE8.Matrix4().makeBasis(right, up, back));
     const mag = s.zoom ? st.zoom : s.mag;
     out.fov = s.irons ? baseFov * 0.78 : baseFov / Math.max(1, mag) * (mag > 1 ? 1 : 0.88);
     out.mag = mag;
@@ -3229,6 +3266,12 @@ async function boot(def, lib) {
   }
   function setPart(slotId, partId, pos) {
     const next = { ...cfg, [slotId]: partId ? { id: partId, pos: pos ?? (cfg[slotId]?.id === partId ? cfg[slotId].pos : null) } : null };
+    const slotDef = def.slots.find((s) => s.id === slotId);
+    const newPart = partId && asm.part(partId);
+    if (newPart && slotDef?.behind && !asm.railPositions(slotDef, newPart, slotId).some((p) => !p.clash)) {
+      const room = asm.roomBehind(slotDef, newPart);
+      if (room) next[slotDef.behind] = { id: cfg[slotDef.behind].id, pos: { rail: room.rail, i: room.i } };
+    }
     const before = JSON.stringify(cfg);
     applyConfig(next);
     const part = partId && asm.part(partId);
@@ -3470,7 +3513,9 @@ async function boot(def, lib) {
       st.yaw = lerp(st.yaw, 0, 1 - Math.pow(0.01, dt));
       st.pitch = lerp(st.pitch, 0, 1 - Math.pow(0.01, dt));
     }
-    aim.rotation.set(0, st.yaw, st.pitch + st.climb, "YZX");
+    const cs = sights[st.sightIdx];
+    const cant = st.adsT > 0 && cs?.up ? -Math.atan2(cs.up.z, cs.up.y) * ease(st.adsT) : 0;
+    aim.rotation.set(cant, st.yaw, st.pitch + st.climb, "YZX");
     rig.position.set(-r.z * 1e-3 * 12 + pivotX * 0, 0, 0);
     rig.rotation.set(0, r.y * D2R2 * 0.6, r.p * D2R2 * 0.5);
     rig.position.x -= pivotX * (Math.cos(r.p * D2R2 * 0.5) - 1);
@@ -3494,6 +3539,7 @@ async function boot(def, lib) {
         const magnified = p.mag > 1.5 && st.adsT > 0.92;
         gun.visible = !magnified;
         ui?.scope(magnified ? p : null, st.adsT > 0.92 ? p : null);
+        ui?.nv(!!p.s.nv && !st.magAside && st.adsT > 0.85);
       }
       if (!st.ads && st.adsT === 0) {
         controls.enabled = true;
@@ -3507,6 +3553,7 @@ async function boot(def, lib) {
       st.viewOff = lerp(st.viewOff || 0, off, 1 - Math.pow(0.01, dt));
       gun.visible = true;
       ui?.scope(null, null);
+      ui?.nv(false);
       controls.enabled = true;
       controls.target.lerp(focusTarget, 1 - Math.pow(0.02, dt));
       if (focusDist) {
@@ -3792,7 +3839,72 @@ function magnifier(ctx) {
   const flip = node("flip", [body]);
   flip.position.set(0, 17, -17);
   body.position.set(0, -17, 17);
-  return { root: node("mag3x", [k.build(), flip]), sight: { y: A, z: 0, x0: -56, x1: 54, r: 12, mag: 3, eyeRelief: 70, magnifier: true, lens: lensM }, flipAside: { node: flip, angle: -88 } };
+  return { root: node("mag3x", [k.build(), flip]), sight: { y: A, z: 0, x0: -56, x1: 54, r: 12, mag: 3, eyeRelief: 70, magnifier: true, suffix: " + 3×", lens: lensM }, flipAside: { node: flip, angle: -88 } };
+}
+function rmrBody(ctx, k) {
+  const A = 15;
+  k.add("alu", extrudeX(rrect(0, 4.5, 25, 9, 2.2), -22, 23, { bevel: 1.2 }));
+  k.add("alu", extrudeZ([[-22, 8], [-6, 8], [-6, 10.5, 1.5], [-10, 11.5, 2], [-22, 11, 2]], 23, { bevel: 1.2 }));
+  const arch = (w, h, y0) => {
+    const pts = [[w, y0]];
+    for (let i = 0; i <= 12; i++) {
+      const a = i / 12 * Math.PI;
+      pts.push([Math.cos(a) * w, h - w * 0.55 + Math.sin(a) * w * 0.55]);
+    }
+    pts.push([-w, y0]);
+    return pts;
+  };
+  const hood = shape(arch(12.7, 25.4, 7), [arch(9.6, 22.4, 8.6)]);
+  k.add("alu", extrudeX(hood, -3, 15, { bevel: 1 }));
+  for (const s of [-1, 1]) k.add("rubber", T(cylZ(3.2, 0, 1.6, { c: 0.6, seg: 16 }), { p: [-15, 10, s * 12.4], r: s < 0 ? [0, 180, 0] : [0, 0, 0] }));
+  k.add("steel", T(cylY(2.6, 10.5, 12, { seg: 14 }), { p: [-16, 0, 0] }));
+  k.add("steel", T(cylZ(2.6, 12.5, 13.8, { seg: 14 }), { p: [-2, 12, 0] }));
+  return A;
+}
+function rmrOffset(ctx) {
+  const k = ctx.kit(), m = ctx.kit();
+  k.add("alu", clampBody(-12, 12, 5, { w: 24 }));
+  k.add("steel", crossBolt(0));
+  k.add("alu", extrudeX([[-12, 3, 1], [12, 3, 1], [30, 14, 3], [26, 21, 3], [6, 12, 3], [-12, 8, 2]], -12, 12, { bevel: 1.2 }));
+  m.add("alu", extrudeX(rrect(0, -1.5, 27, 5, 1.5), -23, 24, { bevel: 0.8 }));
+  const A = rmrBody(ctx, m);
+  const glass = lens(ctx, extrudeX(shape(rrect(0, A + 0.5, 18.6, 13.4, 5)), 6, 7, { bevel: 0.2 }), "glassAmber");
+  const cant = node("rmrCant", [m.build(), glass]);
+  cant.position.set(0, 16.5, 22);
+  cant.rotation.x = Math.PI / 4;
+  return {
+    root: node("rmr_offset", [k.build(), cant]),
+    // прицельная ось задана в системе наклонной площадки: при прицеливании оружие заваливается на 45°
+    sight: { node: cant, y: A, z: 0, x0: -22, x1: 15, r: 9, mag: 1, reticle: "dot", lens: glass }
+  };
+}
+function pvs14(ctx) {
+  const k = ctx.kit(), f = ctx.kit();
+  const A = 39;
+  k.add("alu", clampBody(-16, 16, 6));
+  k.add("steel", crossBolt(0));
+  k.add("alu", extrudeX([[-18, 5, 2], [-6, 5, 2], [-6, 14, 3], [-18, 14, 3]], -15, 15, { bevel: 1 }));
+  k.add("steel", cylX(3.6, -17, 17, { seg: 16 }), { p: [0, 11, -15] });
+  f.add("alu", extrudeX(shape([[-17, 8, 2], [-9, 7, 2], [0, 12, 2], [10, 12, 2], [10, 16, 2], [-17, 16, 2]]), -14, 14, { bevel: 1 }));
+  f.add("poly", T(extrudeX(shape(rrect(0, 0, 36, 12, 3)), -26, 16, { bevel: 1.5 }), { p: [0, 20, 0] }));
+  const at = (g) => g.translate(0, A, 0);
+  f.add("poly", at(hollowLathe([[-34, 17], [-30, 20], [22, 20], [26, 17.5]], 13, { seg: 40 })));
+  f.add("poly", at(hollowLathe([[-62, 16.5], [-34, 16.5]], 13, { seg: 36 })));
+  f.add("rubber", at(flutesX(16.5, -58, -40, 24, 1.6, 0.9)));
+  f.add("rubber", at(hollowLathe([[-86, 20.5], [-80, 21.5], [-64, 18.5], [-62, 17]], 15, { seg: 40 })));
+  f.add("poly", at(hollowLathe([[26, 19.5], [58, 19.5], [60, 18]], 15, { seg: 40 })));
+  f.add("rubber", at(flutesX(19.5, 30, 54, 28, 1.8, 1)));
+  f.add("lensBlack", at(tubeX(15, 13.6, 52, 60.2, { seg: 32 })));
+  f.add("poly", T(cylZ(10, -36, -18, { c: 1, seg: 28 }), { p: [0, A + 4, 0] }));
+  f.add("poly", T(ctx.C.knob(10.6, 5, 24), { r: [0, 90, 0], p: [0, A + 4, -36] }));
+  f.add("poly", T(ctx.C.knob(8, 7, 12), { r: [0, 90, 0], p: [-22, A, -19] }));
+  const lensO = lens(ctx, ctx.C.lensDisc(13.8, 56).translate(0, A, 0), "glassBlue");
+  const lensE = lens(ctx, ctx.C.lensDisc(14, -64).translate(0, A, 0), "glassRed");
+  const body = node("pvsBody", [f.build(), lensO, lensE]);
+  const flip = node("flip", [body]);
+  flip.position.set(0, 11, -15);
+  body.position.set(0, -11, 15);
+  return { root: node("pvs14", [k.build(), flip]), sight: { y: A, z: 0, x0: -86, x1: 60, r: 14, mag: 1, eyeRelief: 22, magnifier: true, nv: true, suffix: " + PVS-14", lens: lensE }, flipAside: { node: flip, angle: -95 } };
 }
 function mbusRear(ctx) {
   const k = ctx.kit(), f = ctx.kit();
@@ -3837,6 +3949,8 @@ var OPTICS = [
   { id: "acog", cat: "optic", name: "Trijicon ACOG TA31 4×32", desc: "Призменный 4×, шеврон с дальномерной шкалой", foot: [-32, 32], body: [-75, 76], stats: { weight: 480, ergo: -6, adsTime: 40 }, build: acog },
   { id: "lpvo", cat: "optic", name: "Прицел 1–6×24", desc: "Переменная кратность, колёсико — зум в прицеле", foot: [-38, 34], body: [-132, 106], stats: { weight: 720, ergo: -9, adsTime: 55 }, build: lpvo },
   { id: "mag3x", cat: "magnifier", name: "Aimpoint 3XMag-1 + FTS", desc: "Увеличитель 3×, откидывается вбок", foot: [-16, 16], body: [-57, 55], needs: mag1x39, stats: { weight: 330, ergo: -4, adsTime: 20 }, build: magnifier },
+  { id: "pvs14", cat: "magnifier", name: "Монокуляр AN/PVS-14", desc: "ПНВ за коллиматором на откидном кронштейне (N — откинуть)", foot: [-16, 16], body: [-86, 60], needs: mag1x39, stats: { weight: 420, ergo: -6, adsTime: 25 }, build: pvs14 },
+  { id: "rmr_off", cat: "offset", name: "Trijicon RMR на 45° кронштейне", desc: "Мини-коллиматор сбоку для ближнего боя: V — переключиться, оружие заваливается", foot: [-12, 12], body: [-23, 24], stats: { weight: 95, ergo: -1 }, build: rmrOffset },
   { id: "mbus_rear", cat: "rearsight", name: "Magpul MBUS (целик)", desc: "Складной диоптр, полимер", foot: [-13, 13], body: [-13, 13], stats: { weight: 34 }, build: mbusRear },
   { id: "mbus_front", cat: "frontsight", name: "Magpul MBUS (мушка)", desc: "Складная мушка, полимер", foot: [-13, 13], body: [-13, 13], stats: { weight: 26 }, build: mbusFront }
 ];
@@ -3871,6 +3985,15 @@ function warcomp(ctx, R2) {
   k.add("steel", flutesX(R2, 2, 10, 2, 6, 0.5, { a0: 90 }));
   return { root: k.build("warcomp"), muzzle: { x: 59, kind: "fh", flash: 0.3 } };
 }
+function linear(ctx, r) {
+  const k = ctx.kit();
+  const R2 = 14.3, L = 62;
+  k.add("steel", latheX([[0, 0], [0, r + 1.5], [1, r + 3], [14, r + 3], [15, R2 - 0.6], [16, R2], [L - 1.5, R2], [L, R2 - 1.4], [L, 10.2], [L - 3, 9.6], [L - 3, 0]], { seg: 40 }));
+  k.add("steel", flutesX(r + 3, 3, 12, 2, 8, 0.8, { a0: 90 }));
+  k.add("steel", ringGrooves(R2, 18, 24, 2, 0.4, { seg: 40 }));
+  k.add("lensBlack", cylX(9.7, L - 3.2, L + 0.05, { seg: 28 }));
+  return { root: k.build("linear"), muzzle: { x: L, kind: "linear", flash: 0.15 } };
+}
 function brake(ctx, R2) {
   const k = ctx.kit();
   k.add("steel", latheX([[0, 0], [0, R2 - 0.4], [0.8, R2], [56, R2], [57, R2 - 1], [57, 4.5], [55, 4.5], [55, 0]], { seg: 32 }));
@@ -3886,7 +4009,10 @@ var MUZZLES = [
   { id: "warcomp556", cat: "muzzle", name: "SureFire WarComp 5,56", desc: "Пламегаситель-компенсатор", fit: { thread: ["1/2x28"] }, stats: { weight: 90, length: 49, flash: -45, "recoilV%": -8, "recoilH%": -6, loud: 1 }, build: (c) => warcomp(c, 11) },
   { id: "warcomp762", cat: "muzzle", name: "SureFire WarComp 7,62", desc: "Пламегаситель-компенсатор", fit: { thread: ["5/8x24"] }, stats: { weight: 110, length: 49, flash: -45, "recoilV%": -8, "recoilH%": -6, loud: 1 }, build: (c) => warcomp(c, 12) },
   { id: "pa_brake556", cat: "muzzle", name: "Precision Armament M4-72", desc: "Дульный тормоз: меньше отдача, громче", fit: { thread: ["1/2x28"] }, stats: { weight: 85, length: 47, flash: 25, "recoilV%": -22, "recoilH%": -18, loud: 5 }, build: (c) => brake(c, 11.2) },
-  { id: "pa_brake762", cat: "muzzle", name: "Precision Armament M11", desc: "Дульный тормоз 7,62", fit: { thread: ["5/8x24"] }, stats: { weight: 120, length: 47, flash: 25, "recoilV%": -24, "recoilH%": -18, loud: 5 }, build: (c) => brake(c, 12.5) }
+  { id: "pa_brake762", cat: "muzzle", name: "Precision Armament M11", desc: "Дульный тормоз 7,62", fit: { thread: ["5/8x24"] }, stats: { weight: 120, length: 47, flash: 25, "recoilV%": -24, "recoilH%": -18, loud: 5 }, build: (c) => brake(c, 12.5) },
+  { id: "linear556", cat: "muzzle", name: "Линейный компенсатор KAK", desc: "Уводит газы вперёд: тише для стрелка, чуть больше отдача", fit: { thread: ["1/2x28"] }, stats: { weight: 115, length: 62, flash: -30, loud: -3, "recoilV%": 3 }, build: (c) => linear(c, 6.4) },
+  { id: "linear762", cat: "muzzle", name: "Линейный компенсатор KAK 7,62", desc: "Уводит газы вперёд: тише для стрелка, чуть больше отдача", fit: { thread: ["5/8x24"] }, stats: { weight: 130, length: 62, flash: -30, loud: -3, "recoilV%": 3 }, build: (c) => linear(c, 7.9) },
+  { id: "linear_ak", cat: "muzzle", name: "Линейный компенсатор (АК)", desc: "Уводит газы вперёд: тише для стрелка, чуть больше отдача", fit: { thread: ["m14x1L", "m24x1.5"] }, stats: { weight: 125, length: 62, flash: -30, loud: -3, "recoilV%": 3 }, build: (c) => linear(c, 8.5) }
 ];
 
 // src/engine/lib/tactical.js
@@ -3937,6 +4063,31 @@ function boxLaser(ctx, o) {
   ll.material.transparent = false;
   root.add(ll);
   return { root, laser: { p: [vis[0] + 2, vis[1], vis[2]], lens: ll } };
+}
+function dbal(ctx) {
+  const k = ctx.kit();
+  const L0 = -40, L1 = 36, W = 34, H = 34;
+  k.add("alu", clampBody(-16, 16, 5));
+  k.add("steel", crossBolt(0));
+  k.add("polyTan", extrudeX([[-W / 2, 4, 2], [W / 2, 4, 2], [W / 2, H, 6], [-W / 2, H, 6]], L0, L1 - 8, { bevel: 2.2 }));
+  const ly = 15, lr = 11.5;
+  k.add("polyTan", T(latheX([[L1 - 12, 0], [L1 - 12, lr + 2], [L1 + 4, lr + 3.4], [L1 + 6, lr + 2.6], [L1 + 6, 0]], { seg: 36 }), { p: [0, ly, 0] }));
+  k.add("steel", T(tubeX(lr + 2.7, lr, L1 + 5, L1 + 7, { seg: 36 }), { p: [0, ly, 0] }));
+  const vy = H - 6;
+  k.add("polyTan", extrudeX(rrect(0, vy, 18, 10, 3), L1 - 10, L1 + 2, { bevel: 1 }));
+  k.add("lensBlack", extrudeX(rrect(0, vy, 14, 6.5, 2), L1 + 1.6, L1 + 2.4, { bevel: 0.2 }));
+  k.add("rubber", T(cylY(4.6, H - 1, H + 2.6, { c: 1, seg: 18 }), { p: [L0 + 14, 0, 0] }));
+  k.add("polyTan", T(ctx.C.knob(7, 5, 16), { r: [0, 0, 90], p: [L0 + 30, H - 1, 0] }));
+  for (const z of [-7, 7]) k.add("steel", T(cylY(2.4, H - 1, H + 0.8, { seg: 12 }), { p: [L1 - 18, 0, z] }));
+  const root = node("dbal", [k.build()]);
+  const le = lens(ctx, cylX(lr - 0.1, L1 + 5.2, L1 + 5.8, { seg: 32 }).translate(0, ly, 0), "lampLens");
+  le.renderOrder = 0;
+  le.material.transparent = false;
+  const ll = lens(ctx, cylX(2.4, L1 + 2.3, L1 + 2.8, { seg: 16 }).translate(0, vy, 3), "laserLens");
+  ll.renderOrder = 0;
+  ll.material.transparent = false;
+  root.add(le, ll);
+  return { root, light: { p: [L1 + 7, ly, 0], lens: le, lumens: 300 }, laser: { p: [L1 + 3, vy, 3], lens: ll } };
 }
 function vgrip(ctx, o) {
   const k = ctx.kit();
@@ -4003,6 +4154,7 @@ var TACTICAL = [
   { id: "m300", cat: "light", name: "SureFire M300 Mini Scout", desc: "Компактный фонарь 500 лм", foot: [-13, 13], body: [-60, 44], stats: { weight: 120, ergo: -1 }, build: (c) => scout(c, { name: "m300", r: 11, headR: 12.6, tail: -58, head: 14, lm: 500 }) },
   { id: "peq15", cat: "laser", name: "L3 AN/PEQ-15", desc: "ЛЦУ: видимый + ИК лазер, ИК-осветитель", foot: [-18, 18], body: [-48, 60], stats: { weight: 215, ergo: -3, "hipSpread%": -18 }, build: (c) => boxLaser(c, { name: "peq15", L0: -48, L1: 56, H: 38, W: 50, mat: "polyTan", illum: 8 }) },
   { id: "ls321", cat: "laser", name: "Holosun LS321", desc: "Компактный ЛЦУ с ИК-осветителем", foot: [-18, 18], body: [-34, 46], stats: { weight: 140, ergo: -2, "hipSpread%": -15 }, build: (c) => boxLaser(c, { name: "ls321", L0: -34, L1: 44, H: 32, W: 36, mat: "poly", illum: 6 }) },
+  { id: "dbal", cat: "combo", name: "Steiner DBAL-PL", desc: "Комбо-блок: фонарь 300 лм + видимый лазер (C / Z)", foot: [-16, 16], body: [-42, 44], stats: { weight: 150, ergo: -2, "hipSpread%": -12 }, build: dbal },
   { id: "rvg", cat: "foregrip", name: "Magpul RVG", desc: "Вертикальная рукоятка, контроль отдачи", foot: [-17, 17], body: [-17, 17], stats: { weight: 70, "recoilV%": -6, "recoilH%": -10, ergo: 3, adsTime: 6 }, build: (c) => vgrip(c, { name: "rvg", len: 98, d: 32, ribs: true }) },
   { id: "bcm_vg", cat: "foregrip", name: "BCM Gunfighter Mod 3", desc: "Короткая рукоятка-упор", foot: [-16, 16], body: [-16, 16], stats: { weight: 45, "recoilV%": -4, "recoilH%": -6, ergo: 5 }, build: (c) => vgrip(c, { name: "bcm", len: 62, d: 31, flat: 0.85 }) },
   { id: "afg2", cat: "foregrip", name: "Magpul AFG-2", desc: "Наклонная рукоятка, быстрая вскидка", foot: [-64, 34], body: [-66, 34], stats: { weight: 55, "recoilV%": -3, "recoilH%": -5, ergo: 6, adsTime: -8 }, build: afg },
@@ -4461,9 +4613,10 @@ var m416_default = {
     { id: "frontsight", label: "Мушка", group: "Оптика", accepts: ["frontsight"], rails: ["hgTop"], prefer: "front" },
     { id: "optic", label: "Прицел", group: "Оптика", accepts: ["optic"], rails: ["upperRail", "hgTop"], prefer: { x: -40 } },
     { id: "magnifier", label: "Увеличитель", group: "Оптика", accepts: ["magnifier"], rails: ["upperRail", "hgTop"], prefer: { x: -90 }, behind: "optic" },
+    { id: "offset", label: "Боковой коллиматор", group: "Оптика", accepts: ["offset"], rails: ["upperRail", "hgTop"], prefer: { x: 20 } },
     { id: "under", label: "Под стволом", group: "Тактика", accepts: ["foregrip", "bipod"], rails: ["hgBottom"], prefer: { x: 190 } },
-    { id: "tacRight", label: "Правая планка", group: "Тактика", accepts: ["light", "laser"], rails: ["hgRight"], prefer: "front" },
-    { id: "tacLeft", label: "Левая планка", group: "Тактика", accepts: ["light", "laser"], rails: ["hgLeft"], prefer: "front" },
+    { id: "tacRight", label: "Правая планка", group: "Тактика", accepts: ["light", "laser", "combo"], rails: ["hgRight"], prefer: "front" },
+    { id: "tacLeft", label: "Левая планка", group: "Тактика", accepts: ["light", "laser", "combo"], rails: ["hgLeft"], prefer: "front" },
     { id: "tacTop", label: "Верх цевья", group: "Тактика", accepts: ["laser"], rails: ["hgTop"], prefer: "front" },
     { id: "mag", label: "Магазин", group: "Ствольная коробка", accepts: ["mag"], mount: "magwell", iface: "stanag" },
     { id: "pgrip", label: "Пистолетная рукоять", group: "Ствольная коробка", accepts: ["pgrip"], mount: "grip", iface: "ar" },
