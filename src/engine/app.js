@@ -155,7 +155,7 @@ export async function boot(def, lib) {
     if (mg?.info?.sight && sights[0]) {
       m.copy(toRoot(mg.obj, gun));
       const eye = new THREE.Vector3(mg.info.sight.x0, mg.info.sight.y, 0).applyMatrix4(m);
-      sights.splice(1, 0, { ...sights[0], id: 'magnifier', label: sights[0].label + (mg.info.sight.suffix || ''), eye, mag: mg.info.sight.mag, eyeRelief: mg.info.sight.eyeRelief, nv: !!mg.info.sight.nv, withMag: mg.info.sight.mag > 1 });
+      sights.splice(1, 0, { ...sights[0], id: 'magnifier', label: sights[0].label + (mg.info.sight.suffix || ''), eye, mag: mg.info.sight.mag, eyeRelief: mg.info.sight.eyeRelief, nv: !!mg.info.sight.nv, hide: mg.info.sight.hide, withMag: mg.info.sight.mag > 1 });
     }
     // механика: целик + мушка
     let rear = null, front = null;
@@ -700,7 +700,10 @@ export async function boot(def, lib) {
         const magnified = p.mag > 1.5 && st.adsT > 0.92;
         gun.visible = !magnified;
         ui?.scope(magnified ? p : null, st.adsT > 0.92 ? p : null);
-        ui?.nv(!!p.s.nv && !st.magAside && st.adsT > 0.85);
+        const nv = !!p.s.nv && !st.magAside && st.adsT > 0.85;
+        ui?.nv(nv);
+        // ЭОП непрозрачен: вместо трубы монокуляра — полное поле изображения под виньеткой окуляра
+        for (const q of sights) if (q.hide) q.hide.visible = !(nv && q === p.s);
       }
       if (!st.ads && st.adsT === 0) { controls.enabled = true; }
     } else {
@@ -711,6 +714,7 @@ export async function boot(def, lib) {
       gun.visible = true;
       ui?.scope(null, null);
       ui?.nv(false);
+      for (const q of sights) if (q.hide) q.hide.visible = true;
       controls.enabled = true;
       controls.target.lerp(focusTarget, 1 - Math.pow(0.02, dt));
       if (focusDist) {

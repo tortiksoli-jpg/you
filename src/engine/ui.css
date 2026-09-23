@@ -124,7 +124,7 @@ body.noui .ui{display:none}
 .nv-ov{position:fixed;inset:0;pointer-events:none;display:none;
   background:radial-gradient(circle at 50% 50%, transparent 0, transparent calc(min(40vw,40vh) - 18px), rgba(0,8,0,.7) calc(min(40vw,40vh) - 4px), #000 min(40vw,40vh))}
 body.nv .nv-ov{display:block}
-body.nv canvas{filter:grayscale(1) sepia(1) hue-rotate(52deg) saturate(3.2) brightness(1.45) contrast(1.25)}
+body.nv canvas{filter:grayscale(1) sepia(1) hue-rotate(52deg) saturate(2.6) brightness(1.1) contrast(1.2)}
 .s-ret{position:absolute;left:50%;top:50%;width:calc(min(84vw,84vh));height:calc(min(84vw,84vh));transform:translate(-50%,-50%)}
 .s-ret svg{width:100%;height:100%}
 

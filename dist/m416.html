@@ -131,7 +131,7 @@ body.noui .ui{display:none}
 .nv-ov{position:fixed;inset:0;pointer-events:none;display:none;
   background:radial-gradient(circle at 50% 50%, transparent 0, transparent calc(min(40vw,40vh) - 18px), rgba(0,8,0,.7) calc(min(40vw,40vh) - 4px), #000 min(40vw,40vh))}
 body.nv .nv-ov{display:block}
-body.nv canvas{filter:grayscale(1) sepia(1) hue-rotate(52deg) saturate(3.2) brightness(1.45) contrast(1.25)}
+body.nv canvas{filter:grayscale(1) sepia(1) hue-rotate(52deg) saturate(2.6) brightness(1.1) contrast(1.2)}
 .s-ret{position:absolute;left:50%;top:50%;width:calc(min(84vw,84vh));height:calc(min(84vw,84vh));transform:translate(-50%,-50%)}
 .s-ret svg{width:100%;height:100%}
 
@@ -1302,7 +1302,7 @@ var Assembler = class _Assembler {
       const o = this.installed.get(slot2.behind);
       if (o?.railPos) limit = o.railPos.x + (o.part.body || o.part.foot)[0];
     }
-    return out.map((p) => ({ ...p, clash: p.x + body[1] > limit + 0.5 ? "перед прицелом" : this.clash(p, body, ignoreSlot, slot2) }));
+    return out.map((p) => ({ ...p, clash: p.x + body[1] > limit + 0.5 ? "перед прицелом" : this.clash(p, part, ignoreSlot, slot2) }));
   }
   // Модулю «позади прицела» не хватает места: ищем ближайшую позицию прицела
   // дальше вперёд, при которой он встаёт. Возвращает эту позицию или null.
@@ -1322,14 +1322,18 @@ var Assembler = class _Assembler {
     tgt.railPos = save;
     return found;
   }
-  clash(p, body, ignoreSlot, slot2) {
+  clash(p, part, ignoreSlot, slot2) {
+    const ext = (q) => q.body || q.foot || [-5, 5];
+    const body = ext(part);
     const x0 = p.x + body[0], x1 = p.x + body[1];
     for (const [sid, it] of this.installed) {
       if (sid === ignoreSlot || !it.railPos) continue;
       if (it.railPos.axis !== p.axis) continue;
-      const b = it.part.body || it.part.foot || [-5, 5];
+      const side = part.side || it.part.side;
+      const a = side ? part.foot || body : body, b = side ? it.part.foot || ext(it.part) : ext(it.part);
+      const u0 = p.x + a[0], u1 = p.x + a[1];
       const y0 = it.railPos.x + b[0], y1 = it.railPos.x + b[1];
-      if (x0 < y1 - 0.5 && y0 < x1 - 0.5) return this.def.slots.find((s) => s.id === sid)?.label || sid;
+      if (u0 < y1 - 0.5 && y0 < u1 - 0.5) return this.def.slots.find((s) => s.id === sid)?.label || sid;
     }
     for (const z of this.def.keepOut || []) {
       if (z.axis !== p.axis) continue;
@@ -2880,7 +2884,7 @@ async function boot(def, lib) {
     if (mg?.info?.sight && sights[0]) {
       m.copy(toRoot(mg.obj, gun));
       const eye = new THREE8.Vector3(mg.info.sight.x0, mg.info.sight.y, 0).applyMatrix4(m);
-      sights.splice(1, 0, { ...sights[0], id: "magnifier", label: sights[0].label + (mg.info.sight.suffix || ""), eye, mag: mg.info.sight.mag, eyeRelief: mg.info.sight.eyeRelief, nv: !!mg.info.sight.nv, withMag: mg.info.sight.mag > 1 });
+      sights.splice(1, 0, { ...sights[0], id: "magnifier", label: sights[0].label + (mg.info.sight.suffix || ""), eye, mag: mg.info.sight.mag, eyeRelief: mg.info.sight.eyeRelief, nv: !!mg.info.sight.nv, hide: mg.info.sight.hide, withMag: mg.info.sight.mag > 1 });
     }
     let rear = null, front = null;
     const pts = (it, key) => {
@@ -3539,7 +3543,9 @@ async function boot(def, lib) {
         const magnified = p.mag > 1.5 && st.adsT > 0.92;
         gun.visible = !magnified;
         ui?.scope(magnified ? p : null, st.adsT > 0.92 ? p : null);
-        ui?.nv(!!p.s.nv && !st.magAside && st.adsT > 0.85);
+        const nv = !!p.s.nv && !st.magAside && st.adsT > 0.85;
+        ui?.nv(nv);
+        for (const q of sights) if (q.hide) q.hide.visible = !(nv && q === p.s);
       }
       if (!st.ads && st.adsT === 0) {
         controls.enabled = true;
@@ -3554,6 +3560,7 @@ async function boot(def, lib) {
       gun.visible = true;
       ui?.scope(null, null);
       ui?.nv(false);
+      for (const q of sights) if (q.hide) q.hide.visible = true;
       controls.enabled = true;
       controls.target.lerp(focusTarget, 1 - Math.pow(0.02, dt));
       if (focusDist) {
@@ -3904,7 +3911,7 @@ function pvs14(ctx) {
   const flip = node("flip", [body]);
   flip.position.set(0, 11, -15);
   body.position.set(0, -11, 15);
-  return { root: node("pvs14", [k.build(), flip]), sight: { y: A, z: 0, x0: -86, x1: 60, r: 14, mag: 1, eyeRelief: 22, magnifier: true, nv: true, suffix: " + PVS-14", lens: lensE }, flipAside: { node: flip, angle: -95 } };
+  return { root: node("pvs14", [k.build(), flip]), sight: { y: A, z: 0, x0: -86, x1: 60, r: 14, mag: 1, eyeRelief: 22, magnifier: true, nv: true, hide: body, suffix: " + PVS-14", lens: lensE }, flipAside: { node: flip, angle: -95 } };
 }
 function mbusRear(ctx) {
   const k = ctx.kit(), f = ctx.kit();
@@ -3950,7 +3957,7 @@ var OPTICS = [
   { id: "lpvo", cat: "optic", name: "Прицел 1–6×24", desc: "Переменная кратность, колёсико — зум в прицеле", foot: [-38, 34], body: [-132, 106], stats: { weight: 720, ergo: -9, adsTime: 55 }, build: lpvo },
   { id: "mag3x", cat: "magnifier", name: "Aimpoint 3XMag-1 + FTS", desc: "Увеличитель 3×, откидывается вбок", foot: [-16, 16], body: [-57, 55], needs: mag1x39, stats: { weight: 330, ergo: -4, adsTime: 20 }, build: magnifier },
   { id: "pvs14", cat: "magnifier", name: "Монокуляр AN/PVS-14", desc: "ПНВ за коллиматором на откидном кронштейне (N — откинуть)", foot: [-16, 16], body: [-86, 60], needs: mag1x39, stats: { weight: 420, ergo: -6, adsTime: 25 }, build: pvs14 },
-  { id: "rmr_off", cat: "offset", name: "Trijicon RMR на 45° кронштейне", desc: "Мини-коллиматор сбоку для ближнего боя: V — переключиться, оружие заваливается", foot: [-12, 12], body: [-23, 24], stats: { weight: 95, ergo: -1 }, build: rmrOffset },
+  { id: "rmr_off", cat: "offset", side: true, name: "Trijicon RMR на 45° кронштейне", desc: "Мини-коллиматор сбоку для ближнего боя: V — переключиться, оружие заваливается", foot: [-12, 12], body: [-23, 24], stats: { weight: 95, ergo: -1 }, build: rmrOffset },
   { id: "mbus_rear", cat: "rearsight", name: "Magpul MBUS (целик)", desc: "Складной диоптр, полимер", foot: [-13, 13], body: [-13, 13], stats: { weight: 34 }, build: mbusRear },
   { id: "mbus_front", cat: "frontsight", name: "Magpul MBUS (мушка)", desc: "Складная мушка, полимер", foot: [-13, 13], body: [-13, 13], stats: { weight: 26 }, build: mbusFront }
 ];

@@ -116,7 +116,7 @@ export class Assembler {
       const o = this.installed.get(slot.behind);
       if (o?.railPos) limit = o.railPos.x + (o.part.body || o.part.foot)[0];
     }
-    return out.map((p) => ({ ...p, clash: p.x + body[1] > limit + 0.5 ? 'перед прицелом' : this.clash(p, body, ignoreSlot, slot) }));
+    return out.map((p) => ({ ...p, clash: p.x + body[1] > limit + 0.5 ? 'перед прицелом' : this.clash(p, part, ignoreSlot, slot) }));
   }
 
   // Модулю «позади прицела» не хватает места: ищем ближайшую позицию прицела
@@ -135,14 +135,19 @@ export class Assembler {
     return found;
   }
 
-  clash(p, body, ignoreSlot, slot) {
+  clash(p, part, ignoreSlot, slot) {
+    const ext = (q) => q.body || q.foot || [-5, 5];
+    const body = ext(part);
     const x0 = p.x + body[0], x1 = p.x + body[1];
     for (const [sid, it] of this.installed) {
       if (sid === ignoreSlot || !it.railPos) continue;
       if (it.railPos.axis !== p.axis) continue;
-      const b = it.part.body || it.part.foot || [-5, 5];
+      // корпус бокового модуля вынесен в сторону от планки — делят планку только башмаки
+      const side = part.side || it.part.side;
+      const a = side ? part.foot || body : body, b = side ? it.part.foot || ext(it.part) : ext(it.part);
+      const u0 = p.x + a[0], u1 = p.x + a[1];
       const y0 = it.railPos.x + b[0], y1 = it.railPos.x + b[1];
-      if (x0 < y1 - 0.5 && y0 < x1 - 0.5) return this.def.slots.find((s) => s.id === sid)?.label || sid;
+      if (u0 < y1 - 0.5 && y0 < u1 - 0.5) return this.def.slots.find((s) => s.id === sid)?.label || sid;
     }
     // обязательные зоны на планке (напр. рукоять заряжания, мушка)
     for (const z of this.def.keepOut || []) {

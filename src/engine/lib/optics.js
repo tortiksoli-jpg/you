@@ -259,7 +259,7 @@ function pvs14(ctx) {
   const flip = G.node('flip', [body]);
   flip.position.set(0, 11, -15);
   body.position.set(0, -11, 15);
-  return { root: G.node('pvs14', [k.build(), flip]), sight: { y: A, z: 0, x0: -86, x1: 60, r: 14, mag: 1, eyeRelief: 22, magnifier: true, nv: true, suffix: ' + PVS-14', lens: lensE }, flipAside: { node: flip, angle: -95 } };
+  return { root: G.node('pvs14', [k.build(), flip]), sight: { y: A, z: 0, x0: -86, x1: 60, r: 14, mag: 1, eyeRelief: 22, magnifier: true, nv: true, hide: body, suffix: ' + PVS-14', lens: lensE }, flipAside: { node: flip, angle: -95 } };
 }
 
 function mbusRear(ctx) {
@@ -310,7 +310,7 @@ export const OPTICS = [
   { id: 'lpvo', cat: 'optic', name: 'Прицел 1–6×24', desc: 'Переменная кратность, колёсико — зум в прицеле', foot: [-38, 34], body: [-132, 106], stats: { weight: 720, ergo: -9, adsTime: 55 }, build: lpvo },
   { id: 'mag3x', cat: 'magnifier', name: 'Aimpoint 3XMag-1 + FTS', desc: 'Увеличитель 3×, откидывается вбок', foot: [-16, 16], body: [-57, 55], needs: mag1x39, stats: { weight: 330, ergo: -4, adsTime: 20 }, build: magnifier },
   { id: 'pvs14', cat: 'magnifier', name: 'Монокуляр AN/PVS-14', desc: 'ПНВ за коллиматором на откидном кронштейне (N — откинуть)', foot: [-16, 16], body: [-86, 60], needs: mag1x39, stats: { weight: 420, ergo: -6, adsTime: 25 }, build: pvs14 },
-  { id: 'rmr_off', cat: 'offset', name: 'Trijicon RMR на 45° кронштейне', desc: 'Мини-коллиматор сбоку для ближнего боя: V — переключиться, оружие заваливается', foot: [-12, 12], body: [-23, 24], stats: { weight: 95, ergo: -1 }, build: rmrOffset },
+  { id: 'rmr_off', cat: 'offset', side: true, name: 'Trijicon RMR на 45° кронштейне', desc: 'Мини-коллиматор сбоку для ближнего боя: V — переключиться, оружие заваливается', foot: [-12, 12], body: [-23, 24], stats: { weight: 95, ergo: -1 }, build: rmrOffset },
   { id: 'mbus_rear', cat: 'rearsight', name: 'Magpul MBUS (целик)', desc: 'Складной диоптр, полимер', foot: [-13, 13], body: [-13, 13], stats: { weight: 34 }, build: mbusRear },
   { id: 'mbus_front', cat: 'frontsight', name: 'Magpul MBUS (мушка)', desc: 'Складная мушка, полимер', foot: [-13, 13], body: [-13, 13], stats: { weight: 26 }, build: mbusFront },
 ];
