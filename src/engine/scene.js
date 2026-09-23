@@ -24,7 +24,7 @@ function groundTex() {
       g.fillRect(Math.random() * w, Math.random() * h, s, s);
     }
     for (let i = 0; i < 260; i++) {
-      g.fillStyle = `rgba(60,70,40,${Math.random() * 0.22})`;
+      g.fillStyle = `rgba(70,76,50,${Math.random() * 0.08})`;
       g.beginPath(); g.arc(Math.random() * w, Math.random() * h, Math.random() * 30 + 6, 0, 7); g.fill();
     }
   });
@@ -99,7 +99,7 @@ function buildRange(scene) {
   scene.add(grp);
   const gt = groundTex();
   gt.wrapS = gt.wrapT = THREE.RepeatWrapping;
-  gt.repeat.set(120, 120);
+  gt.repeat.set(260, 260);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshStandardMaterial({ map: gt, roughness: 0.96, color: 0xb8b0a0 }));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
@@ -107,32 +107,23 @@ function buildRange(scene) {
   grp.add(ground);
 
   // огневой рубеж: бетонная площадка и стол
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x9a9892, roughness: 0.9 });
+  const concrete = new THREE.MeshStandardMaterial({ color: 0x6f6e6a, roughness: 0.92 });
   const pad = new THREE.Mesh(new THREE.BoxGeometry(6, 0.12, 5), concrete);
+  pad.userData.surface = 'dirt';
   pad.position.set(-0.8, 0.06, 0); pad.receiveShadow = true;
   grp.add(pad);
-  const woodM = new THREE.MeshStandardMaterial({ color: 0x6d5236, roughness: 0.8 });
-  const metalM = new THREE.MeshStandardMaterial({ color: 0x2c2e30, roughness: 0.6, metalness: 0.6 });
-  const bench = new THREE.Group();
-  const top = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.05, 1.6), woodM);
-  top.position.y = 0.92; top.castShadow = top.receiveShadow = true;
-  bench.add(top);
-  for (const [x, z] of [[-0.4, -0.7], [0.4, -0.7], [-0.4, 0.7], [0.4, 0.7]]) {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.9, 0.05), metalM);
-    leg.position.set(x, 0.45, z); leg.castShadow = true;
-    bench.add(leg);
-  }
-  bench.position.set(0.05, 0.12, 0.2);
-  grp.add(bench);
-
   // вал-пулеулавливатель и боковые валы
   const dirt = new THREE.MeshStandardMaterial({ color: 0x7a6b52, roughness: 1 });
-  const berm = new THREE.Mesh(new THREE.BoxGeometry(14, 9, 120), dirt);
-  berm.position.set(128, 3.2, 0); berm.rotation.z = 0.35; berm.userData.surface = 'dirt';
+  const berm = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 140, 16, 1, false, 0, Math.PI), dirt);
+  berm.rotation.x = Math.PI / 2; berm.rotation.z = Math.PI / 2 * 0; berm.rotation.set(Math.PI / 2, 0, -Math.PI / 2);
+  berm.position.set(126, 0, 0); berm.userData.surface = 'dirt';
   grp.add(berm);
+  const grass = new THREE.MeshStandardMaterial({ color: 0x6d6a4f, roughness: 1 });
   for (const s of [-1, 1]) {
-    const side = new THREE.Mesh(new THREE.BoxGeometry(130, 4, 8), dirt);
-    side.position.set(62, 1.2, s * 26); side.rotation.x = s * 0.3; side.userData.surface = 'dirt';
+    const side = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 150, 12, 1, false, 0, Math.PI), grass);
+    side.scale.set(1, 1, 2.2);
+    side.rotation.z = Math.PI / 2; side.rotation.y = 0;
+    side.position.set(62, 0, s * 42); side.userData.surface = 'dirt';
     grp.add(side);
   }
   // деревья вдали

@@ -1,0 +1,347 @@
+// Процедурный звук: выстрел собирается из слоёв (дульная волна, «тело»,
+// баллистический щелчок пули, механика автоматики, эхо стрельбища).
+// Дульное устройство меняет каждый слой: глушитель срезает дульную волну
+// на ~25 дБ и верх спектра, тормоз делает выстрел громче и резче.
+
+const CAL = {
+  '556': { blastF: 7200, blastT: 0.075, bodyF: 150, bodyT: 0.09, body: 0.55, crack: 0.9, level: 1.0, mechF: 3400 },
+  '545': { blastF: 7600, blastT: 0.07, bodyF: 140, bodyT: 0.09, body: 0.55, crack: 0.95, level: 1.0, mechF: 2900 },
+  '762x39': { blastF: 5200, blastT: 0.1, bodyF: 105, bodyT: 0.13, body: 0.85, crack: 0.75, level: 1.08, mechF: 2500 },
+  '762x51': { blastF: 5600, blastT: 0.12, bodyF: 90, bodyT: 0.15, body: 1.0, crack: 1.0, level: 1.18, mechF: 2300 },
+};
+
+const MUZ = {
+  bare: { blast: 1.1, lp: 1.1, body: 1.0, crack: 1.0, wet: 1.0, attack: 0.0006, tail: 1.0, harsh: 0.15 },
+  fh: { blast: 1.0, lp: 0.95, body: 1.0, crack: 1.0, wet: 1.0, attack: 0.0007, tail: 1.0, harsh: 0.1 },
+  comp: { blast: 1.2, lp: 1.1, body: 1.05, crack: 1.0, wet: 1.15, attack: 0.0005, tail: 1.1, harsh: 0.35 },
+  brake: { blast: 1.45, lp: 1.3, body: 1.1, crack: 1.0, wet: 1.35, attack: 0.0004, tail: 1.2, harsh: 0.6 },
+  supp: { blast: 0.075, lp: 0.2, body: 0.32, crack: 0.55, wet: 0.22, attack: 0.004, tail: 0.6, harsh: 0 },
+};
+
+export class GunAudio {
+  constructor() {
+    this.ctx = null;
+    this.muted = false;
+    this.profile = { cal: '556', mech: 0.8 };
+    this.muzzle = 'fh';
+    this.lastShot = -10;
+  }
+
+  init() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const c = this.ctx = new AC();
+    this.master = c.createGain();
+    this.master.gain.value = this.muted ? 0 : 0.8;
+    const comp = c.createDynamicsCompressor();
+    comp.threshold.value = -10; comp.knee.value = 6; comp.ratio.value = 8; comp.attack.value = 0.001; comp.release.value = 0.12;
+    this.master.connect(comp).connect(c.destination);
+    this.dry = c.createGain();
+    this.dry.connect(this.master);
+    this.verb = c.createConvolver();
+    this.verb.buffer = this.impulse(2.6);
+    this.wet = c.createGain();
+    this.wet.gain.value = 0.55;
+    this.verb.connect(this.wet).connect(this.master);
+    this.noise = this.noiseBuf(1.5, 'white');
+    this.pink = this.noiseBuf(1.5, 'pink');
+    this.crackBuf = this.nwave();
+  }
+
+  setMuted(m) {
+    this.muted = m;
+    if (this.master) this.master.gain.setTargetAtTime(m ? 0 : 0.8, this.ctx.currentTime, 0.02);
+  }
+
+  noiseBuf(sec, kind) {
+    const c = this.ctx, n = Math.floor(c.sampleRate * sec);
+    const b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < n; i++) {
+      const w = Math.random() * 2 - 1;
+      if (kind === 'pink') {
+        b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+        b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+        d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+      } else d[i] = w;
+    }
+    return b;
+  }
+
+  // N-волна сверхзвуковой пули: короткий двуполярный импульс.
+  nwave() {
+    const c = this.ctx, n = Math.floor(c.sampleRate * 0.006);
+    const b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
+    const L = Math.floor(c.sampleRate * 0.0009);
+    for (let i = 0; i < n; i++) {
+      if (i < L) d[i] = 1 - (2 * i) / L; else d[i] = Math.exp(-(i - L) / (c.sampleRate * 0.0006)) * -0.3 * Math.sin(i * 0.9);
+    }
+    return b;
+  }
+
+  // Импульсная характеристика открытого стрельбища: плотный хвост + отражения от валов.
+  impulse(sec) {
+    const c = this.ctx, n = Math.floor(c.sampleRate * sec);
+    const b = c.createBuffer(2, n, c.sampleRate);
+    const refl = [[0.045, 0.5], [0.11, 0.35], [0.19, 0.3], [0.31, 0.42], [0.52, 0.22], [0.78, 0.16]];
+    for (let ch = 0; ch < 2; ch++) {
+      const d = b.getChannelData(ch);
+      let lp = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / c.sampleRate;
+        const w = Math.random() * 2 - 1;
+        lp += (w - lp) * (0.35 - Math.min(0.3, t * 0.14));
+        d[i] = lp * Math.pow(1 - t / sec, 3.2) * 0.35;
+      }
+      for (const [t, a] of refl) {
+        const s = Math.floor((t + (ch ? 0.007 : 0)) * c.sampleRate);
+        for (let j = 0; j < 900 && s + j < n; j++) d[s + j] += (Math.random() * 2 - 1) * a * Math.exp(-j / 180);
+      }
+    }
+    return b;
+  }
+
+  env(g, t, a, peak, tau, end) {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(peak, t + a);
+    g.gain.setTargetAtTime(0.0001, t + a, tau);
+    if (end) g.gain.setValueAtTime(0, t + end);
+  }
+
+  src(buf, t, dur, rate = 1) {
+    const s = this.ctx.createBufferSource();
+    s.buffer = buf; s.playbackRate.value = rate;
+    s.start(t, Math.random() * (buf.duration - dur - 0.01), dur);
+    return s;
+  }
+
+  out(node, wet = 0, pan = 0) {
+    let n = node;
+    if (pan && this.ctx.createStereoPanner) { const p = this.ctx.createStereoPanner(); p.pan.value = pan; n.connect(p); n = p; }
+    n.connect(this.dry);
+    if (wet > 0) { const w = this.ctx.createGain(); w.gain.value = wet; n.connect(w).connect(this.verb); }
+  }
+
+  // Щелчок/лязг металла: полосовой шум + затухающие моды.
+  clank(t, f, level, dur = 0.05, q = 6, modes = 2, pan = 0.1, wet = 0.08) {
+    const c = this.ctx;
+    const s = this.src(this.noise, t, dur + 0.02, 1);
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
+    const g = c.createGain(); this.env(g, t, 0.0008, level, dur * 0.3, dur + 0.02);
+    s.connect(bp).connect(g);
+    this.out(g, wet, pan);
+    for (let i = 0; i < modes; i++) {
+      const o = c.createOscillator(); o.type = 'sine';
+      o.frequency.value = f * (1 + i * 1.73) * (0.97 + Math.random() * 0.06);
+      const og = c.createGain(); this.env(og, t, 0.0005, level * 0.18 / (i + 1), dur * 0.5, dur * 3);
+      o.connect(og); this.out(og, wet, pan);
+      o.start(t); o.stop(t + dur * 3 + 0.05);
+    }
+  }
+
+  // Глухой удар (пластик, ладонь).
+  thud(t, f, level, dur = 0.06, pan = 0) {
+    const c = this.ctx;
+    const s = this.src(this.pink, t, dur + 0.02);
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = f;
+    const g = c.createGain(); this.env(g, t, 0.001, level, dur * 0.35, dur + 0.02);
+    s.connect(lp).connect(g);
+    this.out(g, 0.05, pan);
+  }
+
+  // Шорох/скольжение (затвор, магазин в шахте).
+  slide(t, f0, f1, level, dur, pan = 0.1) {
+    const c = this.ctx;
+    const s = this.src(this.noise, t, dur + 0.02);
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 2.5;
+    bp.frequency.setValueAtTime(f0, t); bp.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(level, t + dur * 0.3); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    s.connect(bp).connect(g);
+    this.out(g, 0.03, pan);
+  }
+
+  /* --------------------------------------------------------------- выстрел */
+
+  shot(o = {}) {
+    if (!this.ctx || this.muted) return;
+    const c = this.ctx, t = c.currentTime + 0.005;
+    const P = CAL[this.profile.cal] || CAL['556'];
+    const M = MUZ[this.muzzle] || MUZ.fh;
+    const v = 0.92 + Math.random() * 0.16;
+    // «первый выстрел» глушителя громче — в холодной банке есть кислород
+    const frp = this.muzzle === 'supp' && t - this.lastShot > 3 ? 1.9 : 1;
+    this.lastShot = t;
+    const L = P.level * v;
+
+    // 1) дульная волна
+    {
+      const s = this.src(this.noise, t, 0.6, 0.9 + Math.random() * 0.2);
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(P.blastF * M.lp * (0.9 + Math.random() * 0.2), t);
+      lp.frequency.exponentialRampToValueAtTime(Math.max(300, P.blastF * M.lp * 0.18), t + P.blastT * 2.5);
+      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = this.muzzle === 'supp' ? 90 : 55;
+      const g = c.createGain();
+      this.env(g, t, M.attack, 1.25 * L * M.blast * frp, P.blastT * M.tail, 0.7);
+      s.connect(lp).connect(hp).connect(g);
+      this.out(g, 0.9 * M.wet);
+    }
+    // резкая составляющая дульного тормоза
+    if (M.harsh > 0) {
+      const s = this.src(this.noise, t, 0.25);
+      const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2600; bp.Q.value = 1.2;
+      const g = c.createGain(); this.env(g, t, 0.0004, 0.9 * L * M.harsh, 0.035, 0.3);
+      s.connect(bp).connect(g);
+      this.out(g, 0.6 * M.wet);
+    }
+    // 2) «тело» выстрела — низкочастотный удар
+    {
+      const osc = c.createOscillator(); osc.type = 'sine';
+      const f = P.bodyF * (this.muzzle === 'supp' ? 0.8 : 1) * (0.95 + Math.random() * 0.1);
+      osc.frequency.setValueAtTime(f, t);
+      osc.frequency.exponentialRampToValueAtTime(f * 0.33, t + P.bodyT);
+      const g = c.createGain(); this.env(g, t, 0.002, 1.1 * L * P.body * M.body * frp, P.bodyT * 0.5, P.bodyT * 3);
+      const ws = c.createWaveShaper(); ws.curve = this.softclip || (this.softclip = (() => { const a = new Float32Array(256); for (let i = 0; i < 256; i++) { const x = i / 128 - 1; a[i] = Math.tanh(x * 2.2); } return a; })());
+      osc.connect(ws).connect(g);
+      this.out(g, 0.35 * M.wet);
+      osc.start(t); osc.stop(t + P.bodyT * 3 + 0.05);
+      // суб-хлопок из шума
+      const s = this.src(this.pink, t, 0.3);
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = this.muzzle === 'supp' ? 380 : 700;
+      const g2 = c.createGain(); this.env(g2, t, 0.001, 1.6 * L * P.body * M.body * frp, P.bodyT * 0.7, 0.35);
+      s.connect(lp).connect(g2);
+      this.out(g2, 0.5 * M.wet);
+    }
+    // 3) щелчок сверхзвуковой пули
+    {
+      const s = c.createBufferSource(); s.buffer = this.crackBuf;
+      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1800;
+      const g = c.createGain(); g.gain.value = 0.55 * P.crack * M.crack * v;
+      s.connect(hp).connect(g);
+      this.out(g, 0.25);
+      s.start(t + 0.002);
+    }
+    // 4) механика: отпирание, удар рамы в крайнем заднем, накат и запирание
+    {
+      const mech = (this.profile.mech ?? 0.8) * (this.muzzle === 'supp' ? 1.25 : 1);
+      const cyc = 60 / (this.profile.rpm || 700);
+      this.clank(t + 0.003, P.mechF, 0.22 * mech, 0.03, 5, 2, 0.15, 0.05);
+      this.clank(t + cyc * 0.45, P.mechF * 0.8, 0.16 * mech, 0.035, 4, 2, 0.15, 0.05);
+      this.clank(t + cyc * 0.85, P.mechF * 1.15, 0.28 * mech, 0.04, 6, 3, 0.12, 0.06);
+      if (this.profile.cal === '762x39' || this.profile.cal === '545') this.clank(t + cyc * 0.9, P.mechF * 0.55, 0.12 * mech, 0.05, 3, 1, 0.1);
+    }
+    // 5) эхо от вала — поздний приглушённый повтор
+    if (this.muzzle !== 'supp') {
+      const s = this.src(this.pink, t + 0.34, 0.25);
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
+      const g = c.createGain(); this.env(g, t + 0.34, 0.01, 0.14 * L * M.wet, 0.09, 0.3);
+      s.connect(lp).connect(g);
+      this.out(g, 0.6, -0.2);
+    }
+  }
+
+  dryFire() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    this.clank(t, 3800, 0.2, 0.02, 7, 1, 0.1);
+    this.thud(t + 0.004, 900, 0.1, 0.03);
+  }
+
+  selector() { if (!this.ctx || this.muted) return; const t = this.ctx.currentTime; this.clank(t, 4200, 0.18, 0.018, 8, 1, 0.2); this.clank(t + 0.03, 3000, 0.1, 0.015, 8, 1, 0.2); }
+  click() { if (!this.ctx || this.muted) return; const t = this.ctx.currentTime; this.clank(t, 5200, 0.1, 0.012, 9, 1, 0); }
+
+  magOut(kind = 'steel') {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime, poly = kind !== 'steel';
+    this.clank(t, 2800, 0.24, 0.03, 5, 1, 0.2);
+    this.slide(t + 0.02, 2200, 900, 0.18, 0.12, 0.2);
+    if (poly) this.thud(t + 0.1, 1200, 0.14, 0.05, 0.2); else this.clank(t + 0.1, 1700, 0.12, 0.05, 4, 2, 0.2);
+  }
+
+  magIn(kind = 'steel') {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime, poly = kind !== 'steel';
+    this.slide(t, 700, 2000, 0.16, 0.1, 0.2);
+    if (poly) this.thud(t + 0.1, 1500, 0.3, 0.05, 0.2);
+    this.clank(t + 0.1, poly ? 2200 : 2900, 0.34, 0.04, 5, 2, 0.2);
+    this.clank(t + 0.13, 4100, 0.16, 0.02, 8, 1, 0.2);
+  }
+
+  magDropGround(kind = 'steel') {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    this.thud(t, 500, 0.25, 0.08, 0.3);
+    if (kind === 'steel') this.clank(t + 0.005, 1400, 0.1, 0.06, 3, 2, 0.3);
+  }
+
+  chargeBack() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    this.clank(t, 2400, 0.2, 0.025, 5, 1, 0.2);
+    this.slide(t + 0.01, 1300, 3600, 0.22, 0.13, 0.2);
+  }
+
+  chargeRelease() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    this.slide(t, 3200, 1400, 0.2, 0.06, 0.2);
+    this.clank(t + 0.06, 2600, 0.5, 0.05, 5, 3, 0.15);
+    this.clank(t + 0.075, 4500, 0.2, 0.02, 8, 1, 0.15);
+  }
+
+  boltCatch() { if (!this.ctx || this.muted) return; const t = this.ctx.currentTime; this.clank(t, 3600, 0.3, 0.02, 7, 1, -0.1); this.chargeRelease(); }
+
+  // Установка модуля: щелчки прижима или храповик резьбы.
+  attach(kind) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    if (kind === 'thread' || kind === 'supp') {
+      for (let i = 0; i < 7; i++) this.clank(t + i * 0.055, 3600 + Math.random() * 400, 0.1, 0.012, 9, 1, 0);
+      this.clank(t + 0.42, 2300, 0.2, 0.04, 5, 2, 0);
+    } else if (kind === 'poly') {
+      this.thud(t, 1400, 0.25, 0.04);
+      this.clank(t + 0.03, 3000, 0.1, 0.02, 6, 1, 0);
+    } else {
+      this.clank(t, 2600, 0.2, 0.03, 5, 2, 0);
+      this.clank(t + 0.09, 3900, 0.14, 0.02, 8, 1, 0);
+      this.slide(t + 0.12, 3000, 5000, 0.05, 0.08, 0);
+    }
+  }
+
+  fold() { if (!this.ctx || this.muted) return; const t = this.ctx.currentTime; this.clank(t, 2400, 0.22, 0.03, 5, 2, 0.1); this.clank(t + 0.22, 1900, 0.35, 0.05, 4, 2, 0.1); }
+  bipod() { if (!this.ctx || this.muted) return; const t = this.ctx.currentTime; this.slide(t, 1500, 3000, 0.08, 0.12); this.clank(t + 0.12, 2100, 0.3, 0.05, 4, 3, 0); this.clank(t + 0.15, 2300, 0.25, 0.05, 4, 3, 0); }
+
+  // Гильза падает на бетон/землю.
+  casing(delay = 0.5, steel = false, vol = 1) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime + delay;
+    const f = steel ? 3600 : 5600;
+    const pan = 0.35 + Math.random() * 0.3;
+    this.clank(t, f * (0.9 + Math.random() * 0.2), 0.08 * vol, 0.05, 12, 3, pan, 0.1);
+    this.clank(t + 0.07 + Math.random() * 0.05, f * 1.1 * (0.9 + Math.random() * 0.2), 0.04 * vol, 0.04, 12, 2, pan, 0.1);
+    this.clank(t + 0.16 + Math.random() * 0.08, f * 0.95, 0.02 * vol, 0.03, 12, 1, pan, 0.1);
+  }
+
+  // Попадание в стальную мишень: звон, приходит с задержкой по дальности.
+  ding(dist, level = 1) {
+    if (!this.ctx || this.muted) return;
+    const c = this.ctx, t = c.currentTime + dist / 343;
+    const a = Math.min(1, 12 / Math.max(6, dist)) * level;
+    for (const [f, k] of [[820, 1], [2150, 0.6], [3710, 0.35], [5120, 0.2]]) {
+      const o = c.createOscillator(); o.frequency.value = f * (0.98 + Math.random() * 0.04);
+      const g = c.createGain(); this.env(g, t, 0.001, 0.22 * a * k, 0.18 / (1 + k * 0.2), 1.4);
+      o.connect(g); this.out(g, 0.5);
+      o.start(t); o.stop(t + 1.45);
+    }
+  }
+
+  thump(dist) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime + dist / 343;
+    const a = Math.min(1, 10 / Math.max(6, dist));
+    const c = this.ctx, s = this.src(this.pink, t, 0.2);
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500;
+    const g = c.createGain(); this.env(g, t, 0.003, 0.25 * a, 0.05, 0.2);
+    s.connect(lp).connect(g); this.out(g, 0.3);
+  }
+}

@@ -160,10 +160,10 @@ export default {
   slots: [
     { id: 'handguard', label: 'Цевьё', group: 'Цевьё и ствол', accepts: ['hg'], mount: 'hg', iface: 'hk416' },
     { id: 'muzzle', label: 'Дульное устройство', group: 'Цевьё и ствол', accepts: ['muzzle'], mount: 'muzzle' },
-    { id: 'optic', label: 'Прицел', group: 'Оптика', accepts: ['optic'], rails: ['upperRail', 'hgTop'], prefer: { x: -70 } },
     { id: 'rearsight', label: 'Целик', group: 'Оптика', accepts: ['rearsight'], rails: ['upperRail'], prefer: 'rear' },
     { id: 'frontsight', label: 'Мушка', group: 'Оптика', accepts: ['frontsight'], rails: ['hgTop'], prefer: 'front' },
-    { id: 'magnifier', label: 'Увеличитель', group: 'Оптика', accepts: ['magnifier'], rails: ['upperRail', 'hgTop'], prefer: { x: -120 } },
+    { id: 'optic', label: 'Прицел', group: 'Оптика', accepts: ['optic'], rails: ['upperRail', 'hgTop'], prefer: { x: -40 } },
+    { id: 'magnifier', label: 'Увеличитель', group: 'Оптика', accepts: ['magnifier'], rails: ['upperRail', 'hgTop'], prefer: { x: -90 }, behind: 'optic' },
     { id: 'under', label: 'Под стволом', group: 'Тактика', accepts: ['foregrip', 'bipod'], rails: ['hgBottom'], prefer: { x: 190 } },
     { id: 'tacRight', label: 'Правая планка', group: 'Тактика', accepts: ['light', 'laser'], rails: ['hgRight'], prefer: 'front' },
     { id: 'tacLeft', label: 'Левая планка', group: 'Тактика', accepts: ['light', 'laser'], rails: ['hgLeft'], prefer: 'front' },

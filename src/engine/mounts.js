@@ -110,7 +110,13 @@ export class Assembler {
     out.sort((a, b) => a.x - b.x);
     // исключить позиции, где корпус модуля пересекается с уже установленными
     const body = part.body || part.foot || [-5, 5];
-    return out.map((p) => ({ ...p, clash: this.clash(p, body, ignoreSlot, slot) }));
+    // увеличитель ставится строго позади основного прицела
+    let limit = Infinity;
+    if (slot.behind) {
+      const o = this.installed.get(slot.behind);
+      if (o?.railPos) limit = o.railPos.x + (o.part.body || o.part.foot)[0];
+    }
+    return out.map((p) => ({ ...p, clash: p.x + body[1] > limit + 0.5 ? 'перед прицелом' : this.clash(p, body, ignoreSlot, slot) }));
   }
 
   clash(p, body, ignoreSlot, slot) {

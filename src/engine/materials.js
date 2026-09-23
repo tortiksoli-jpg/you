@@ -85,7 +85,7 @@ function makeTextures() {
       const v = y / S + n[i] * 0.35 + n2[i] * 0.04;
       const ring = Math.pow(Math.abs(Math.sin(v * Math.PI * 9)), 6);
       const fib = n2[(y * S + ((x * 5) % S))] * 0.25;
-      const k = 0.78 + fib - ring * 0.32 + (coarse[i] - 0.5) * 0.18;
+      const k = 0.82 + fib * 0.6 - ring * 0.17 + (coarse[i] - 0.5) * 0.12;
       return [hue[0] * k, hue[1] * k, hue[2] * k];
     }, true);
   };
@@ -100,7 +100,7 @@ function makeTextures() {
     nCast: normalFrom(mix, S, 3.2),
     nPoly: normalFrom(stipple, S, 5.5),
     nWood: normalFrom(woodH, S, 1.6),
-    woodBirch: wood([196, 92, 48]),
+    woodBirch: wood([150, 66, 36]),
     woodWalnut: wood([120, 70, 40]),
   };
 }
@@ -114,13 +114,13 @@ export function createMaterials(envMap) {
 
   const metal = (color, rough, metal, o = {}) => std({
     color, roughness: rough, metalness: metal,
-    roughnessMap: rep(o.brushed ? tex.roughBrushed : tex.rough, o.tile ?? 70),
-    normalMap: rep(o.cast ? tex.nCast : tex.nMetal, o.tile ?? 70), normalScale: new THREE.Vector2(o.ns ?? 0.35, o.ns ?? 0.35),
+    roughnessMap: rep(o.brushed ? tex.roughBrushed : tex.rough, o.tile ?? 40),
+    normalMap: rep(o.cast ? tex.nCast : tex.nMetal, o.tile ?? 30), normalScale: new THREE.Vector2((o.ns ?? 0.35) * 0.45, (o.ns ?? 0.35) * 0.45),
     envMapIntensity: o.env ?? 1,
   });
   const poly = (color, rough, o = {}) => std({
     color, roughness: rough, metalness: 0,
-    roughnessMap: rep(tex.rough, 50), normalMap: rep(tex.nPoly, o.tile ?? 24), normalScale: new THREE.Vector2(o.ns ?? 0.45, o.ns ?? 0.45),
+    roughnessMap: rep(tex.rough, 50), normalMap: rep(tex.nPoly, o.tile ?? 14), normalScale: new THREE.Vector2((o.ns ?? 0.45) * 0.55, (o.ns ?? 0.45) * 0.55),
     envMapIntensity: o.env ?? 0.8,
   });
 
@@ -161,10 +161,10 @@ export function createMaterials(envMap) {
   // стекло
   const glass = (color, op) => phys({ color, roughness: 0.04, metalness: 0.1, transparent: true, opacity: op,
     depthWrite: false, envMapIntensity: 2.2, clearcoat: 1, clearcoatRoughness: 0.02, side: THREE.DoubleSide });
-  R.glass = glass(0x9ec2d8, 0.16);
-  R.glassAmber = glass(0xd6a35a, 0.2);
-  R.glassRed = glass(0xe07a6a, 0.2);
-  R.glassBlue = glass(0x6a8fe0, 0.22);
+  R.glass = glass(0xb8d4e4, 0.08);
+  R.glassAmber = glass(0xe0b070, 0.1);
+  R.glassRed = glass(0xe8a090, 0.09);
+  R.glassBlue = glass(0x8aa8e8, 0.1);
   R.glassDark = glass(0x223344, 0.55);
   R.lensBlack = std({ color: 0x050607, roughness: 0.25, metalness: 0.2 });
 
@@ -180,8 +180,6 @@ export function createMaterials(envMap) {
   R.paintWhite = std({ color: 0xdedbd2, roughness: 0.55 });
   R.paper = std({ color: 0xe9e3d3, roughness: 0.95 });
   R.target = std({ color: 0xcfc8b6, roughness: 0.6, metalness: 0.2 });
-
-  for (const m of Object.values(R)) if (envMap && m.envMap === null) m.envMap = null;
 
   const cache = new Map();
   return {
