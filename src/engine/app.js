@@ -74,6 +74,7 @@ export async function boot(def, lib) {
   let sights = [];
   let lights = [], lasers = [];
   let stencilRef = 1;
+  let lastOptic = null;
 
   function magKind() {
     const it = asm.installed.get('mag');
@@ -165,8 +166,11 @@ export async function boot(def, lib) {
       const dir = front.clone().sub(rear).normalize();
       sights.push({ id: 'irons', label: 'Механический прицел', eye: rear, dir, mag: 1, irons: true, x0: rear.x });
     }
+    // только что установленный прицел становится активным
+    const optNow = sights.find((s) => s.id === 'optic')?.label || null;
     const i = sights.findIndex((s) => s.id === prev);
-    st.sightIdx = i >= 0 ? i : 0;
+    st.sightIdx = i >= 0 && optNow === lastOptic ? i : 0;
+    lastOptic = optNow;
     if (sights[st.sightIdx]?.id === 'magnifier' && st.magAside) st.sightIdx = 0;
   }
 
@@ -205,7 +209,7 @@ export async function boot(def, lib) {
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), s.dir);
     out.quat.copy(q);
     const mag = s.zoom ? st.zoom : s.mag;
-    out.fov = s.irons ? baseFov * 0.92 : baseFov / Math.max(1, mag) * (mag > 1 ? 1 : 0.88);
+    out.fov = s.irons ? baseFov * 0.78 : baseFov / Math.max(1, mag) * (mag > 1 ? 1 : 0.88);
     out.mag = mag;
     out.s = s;
     return out;

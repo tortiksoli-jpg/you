@@ -280,11 +280,10 @@ function buildRange(scene) {
   pad.receiveShadow = true;
   grp.add(pad);
   const dirt = new THREE.MeshStandardMaterial({ color: 8022866, roughness: 1 });
-  const berm = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 140, 16, 1, false, 0, Math.PI), dirt);
+  const berm = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 140, 20, 1, false, Math.PI / 2, Math.PI), dirt);
   berm.rotation.x = Math.PI / 2;
-  berm.rotation.z = Math.PI / 2 * 0;
-  berm.rotation.set(Math.PI / 2, 0, -Math.PI / 2);
-  berm.position.set(126, 0, 0);
+  berm.scale.set(1.4, 1, 1);
+  berm.position.set(128, 0, 0);
   berm.userData.surface = "dirt";
   grp.add(berm);
   const grass = new THREE.MeshStandardMaterial({ color: 7170639, roughness: 1 });
@@ -2766,6 +2765,7 @@ async function boot(def, lib) {
   let sights = [];
   let lights = [], lasers = [];
   let stencilRef = 1;
+  let lastOptic = null;
   function magKind() {
     const it = asm.installed.get("mag");
     const m = it?.obj;
@@ -2864,8 +2864,10 @@ async function boot(def, lib) {
       const dir = front.clone().sub(rear).normalize();
       sights.push({ id: "irons", label: "Механический прицел", eye: rear, dir, mag: 1, irons: true, x0: rear.x });
     }
+    const optNow = sights.find((s) => s.id === "optic")?.label || null;
     const i = sights.findIndex((s) => s.id === prev);
-    st.sightIdx = i >= 0 ? i : 0;
+    st.sightIdx = i >= 0 && optNow === lastOptic ? i : 0;
+    lastOptic = optNow;
     if (sights[st.sightIdx]?.id === "magnifier" && st.magAside) st.sightIdx = 0;
   }
   const f = base.focus || { center: [0, 0, 0], size: 900 };
@@ -2899,7 +2901,7 @@ async function boot(def, lib) {
     const q = new THREE8.Quaternion().setFromUnitVectors(new THREE8.Vector3(0, 0, -1), s.dir);
     out.quat.copy(q);
     const mag = s.zoom ? st.zoom : s.mag;
-    out.fov = s.irons ? baseFov * 0.92 : baseFov / Math.max(1, mag) * (mag > 1 ? 1 : 0.88);
+    out.fov = s.irons ? baseFov * 0.78 : baseFov / Math.max(1, mag) * (mag > 1 ? 1 : 0.88);
     out.mag = mag;
     out.s = s;
     return out;

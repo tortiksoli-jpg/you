@@ -114,9 +114,11 @@ function buildRange(scene) {
   grp.add(pad);
   // вал-пулеулавливатель и боковые валы
   const dirt = new THREE.MeshStandardMaterial({ color: 0x7a6b52, roughness: 1 });
-  const berm = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 140, 16, 1, false, 0, Math.PI), dirt);
-  berm.rotation.x = Math.PI / 2; berm.rotation.z = Math.PI / 2 * 0; berm.rotation.set(Math.PI / 2, 0, -Math.PI / 2);
-  berm.position.set(126, 0, 0); berm.userData.surface = 'dirt';
+  // вал поперёк стрельбища: полуцилиндр куполом вверх
+  const berm = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 140, 20, 1, false, Math.PI / 2, Math.PI), dirt);
+  berm.rotation.x = Math.PI / 2;
+  berm.scale.set(1.4, 1, 1);
+  berm.position.set(128, 0, 0); berm.userData.surface = 'dirt';
   grp.add(berm);
   const grass = new THREE.MeshStandardMaterial({ color: 0x6d6a4f, roughness: 1 });
   for (const s of [-1, 1]) {
