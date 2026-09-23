@@ -1,0 +1,1785 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>Оружейная</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#15171a;color:#eceae6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
+canvas{display:block}
+#boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#121417;z-index:100;transition:opacity .4s}
+#boot.off{opacity:0;pointer-events:none}
+.boot-in{display:flex;gap:12px;align-items:center;font-size:14px;color:#c9ccd0}
+.spin{width:18px;height:18px;border:2px solid rgba(255,255,255,.2);border-top-color:#e8b45c;border-radius:50%;animation:sp 0.8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+</style>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.166.1/build/three.module.js","three/addons/":"https://unpkg.com/three@0.166.1/examples/jsm/"}}</script>
+</head>
+<body data-weapon="m416">
+<div id="app"></div>
+<div id="boot"><div class="boot-in"><div class="spin"></div><span id="boot-t">Сборка модели…</span></div></div>
+<script type="module">
+var __defProp = Object.defineProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// src/engine/app.js
+import * as THREE6 from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+// src/engine/scene.js
+import * as THREE from "three";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+var GUN_Y = 1.42;
+function canvasTex(w, h, draw, srgb = true) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c);
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+function groundTex() {
+  return canvasTex(512, 512, (g, w, h) => {
+    g.fillStyle = "#6b6552";
+    g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 9e3; i++) {
+      const v = 70 + Math.random() * 60;
+      g.fillStyle = `rgba(${v + 20},${v + 12},${v - 8},${Math.random() * 0.35})`;
+      const s = Math.random() * 3 + 0.5;
+      g.fillRect(Math.random() * w, Math.random() * h, s, s);
+    }
+    for (let i = 0; i < 260; i++) {
+      g.fillStyle = `rgba(60,70,40,${Math.random() * 0.22})`;
+      g.beginPath();
+      g.arc(Math.random() * w, Math.random() * h, Math.random() * 30 + 6, 0, 7);
+      g.fill();
+    }
+  });
+}
+function createScene(canvasHost) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true, powerPreference: "high-performance" });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.localClippingEnabled = true;
+  canvasHost.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environment = env;
+  scene.environmentIntensity = 0.75;
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+    uniforms: { top: { value: new THREE.Color(6125200) }, mid: { value: new THREE.Color(12174281) }, bot: { value: new THREE.Color(9210492) } },
+    vertexShader: "varying vec3 vp; void main(){ vp = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }",
+    fragmentShader: "uniform vec3 top, mid, bot; varying vec3 vp; void main(){ float h = vp.y; vec3 c = h > 0. ? mix(mid, top, pow(h, .55)) : mix(mid, bot, pow(-h, .4)); gl_FragColor = vec4(c, 1.); }"
+  }));
+  scene.add(sky);
+  scene.fog = new THREE.Fog(11845058, 60, 420);
+  const hemi = new THREE.HemisphereLight(13623551, 6971466, 0.55);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(16773340, 2.4);
+  sun.position.set(-2.2, 5.5, 3.2);
+  sun.target.position.set(0, GUN_Y, 0);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  const sc = sun.shadow.camera;
+  sc.left = -1.1;
+  sc.right = 1.1;
+  sc.top = 1.1;
+  sc.bottom = -1.1;
+  sc.near = 1;
+  sc.far = 12;
+  sun.shadow.bias = -4e-4;
+  sun.shadow.normalBias = 0.012;
+  scene.add(sun, sun.target);
+  const rim = new THREE.DirectionalLight(14148863, 1.1);
+  rim.position.set(1.8, 2.4, -3.2);
+  rim.target.position.set(0, GUN_Y, 0);
+  scene.add(rim, rim.target);
+  const fill = new THREE.DirectionalLight(16774374, 0.5);
+  fill.position.set(0.5, 0.6, 3);
+  fill.target.position.set(0, GUN_Y, 0);
+  scene.add(fill, fill.target);
+  const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 8e-3, 900);
+  camera.position.set(-0.25, GUN_Y + 0.25, 1.35);
+  const range = buildRange(scene);
+  addEventListener("resize", () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+  return { renderer, scene, camera, sun, range, env };
+}
+function buildRange(scene) {
+  const grp = new THREE.Group();
+  scene.add(grp);
+  const gt = groundTex();
+  gt.wrapS = gt.wrapT = THREE.RepeatWrapping;
+  gt.repeat.set(120, 120);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshStandardMaterial({ map: gt, roughness: 0.96, color: 12103840 }));
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  ground.userData.surface = "dirt";
+  grp.add(ground);
+  const concrete = new THREE.MeshStandardMaterial({ color: 10131602, roughness: 0.9 });
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(6, 0.12, 5), concrete);
+  pad.position.set(-0.8, 0.06, 0);
+  pad.receiveShadow = true;
+  grp.add(pad);
+  const woodM = new THREE.MeshStandardMaterial({ color: 7164470, roughness: 0.8 });
+  const metalM = new THREE.MeshStandardMaterial({ color: 2895408, roughness: 0.6, metalness: 0.6 });
+  const bench = new THREE.Group();
+  const top = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.05, 1.6), woodM);
+  top.position.y = 0.92;
+  top.castShadow = top.receiveShadow = true;
+  bench.add(top);
+  for (const [x, z] of [[-0.4, -0.7], [0.4, -0.7], [-0.4, 0.7], [0.4, 0.7]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.9, 0.05), metalM);
+    leg.position.set(x, 0.45, z);
+    leg.castShadow = true;
+    bench.add(leg);
+  }
+  bench.position.set(0.05, 0.12, 0.2);
+  grp.add(bench);
+  const dirt = new THREE.MeshStandardMaterial({ color: 8022866, roughness: 1 });
+  const berm = new THREE.Mesh(new THREE.BoxGeometry(14, 9, 120), dirt);
+  berm.position.set(128, 3.2, 0);
+  berm.rotation.z = 0.35;
+  berm.userData.surface = "dirt";
+  grp.add(berm);
+  for (const s of [-1, 1]) {
+    const side = new THREE.Mesh(new THREE.BoxGeometry(130, 4, 8), dirt);
+    side.position.set(62, 1.2, s * 26);
+    side.rotation.x = s * 0.3;
+    side.userData.surface = "dirt";
+    grp.add(side);
+  }
+  const treeM = new THREE.MeshStandardMaterial({ color: 4148532, roughness: 1 });
+  for (let i = 0; i < 60; i++) {
+    const t = new THREE.Mesh(new THREE.ConeGeometry(2 + Math.random() * 2, 8 + Math.random() * 7, 7), treeM);
+    const a = i / 60 * Math.PI * 1.2 - 0.6;
+    t.position.set(150 + Math.random() * 40, 4, Math.sin(a) * 90 + (Math.random() - 0.5) * 20);
+    grp.add(t);
+  }
+  const targets = [];
+  const steelM = new THREE.MeshStandardMaterial({ color: 14275782, roughness: 0.55, metalness: 0.35 });
+  const postM = new THREE.MeshStandardMaterial({ color: 3816252, roughness: 0.7, metalness: 0.4 });
+  const ipsc = new THREE.Shape();
+  ipsc.moveTo(-0.15, 0);
+  ipsc.lineTo(0.15, 0);
+  ipsc.lineTo(0.23, 0.12);
+  ipsc.lineTo(0.23, 0.52);
+  ipsc.lineTo(0.14, 0.6);
+  ipsc.lineTo(0.08, 0.6);
+  ipsc.lineTo(0.08, 0.76);
+  ipsc.lineTo(-0.08, 0.76);
+  ipsc.lineTo(-0.08, 0.6);
+  ipsc.lineTo(-0.14, 0.6);
+  ipsc.lineTo(-0.23, 0.52);
+  ipsc.lineTo(-0.23, 0.12);
+  ipsc.closePath();
+  const ipscG = new THREE.ExtrudeGeometry(ipsc, { depth: 0.012, bevelEnabled: false });
+  ipscG.translate(0, 0, -6e-3);
+  ipscG.rotateY(Math.PI / 2);
+  const plateG = new THREE.CylinderGeometry(0.15, 0.15, 0.012, 32);
+  plateG.rotateZ(Math.PI / 2);
+  const addTarget = (x, z, kind, label) => {
+    const t = new THREE.Group();
+    t.position.set(x, 0, z);
+    const hinge = new THREE.Group();
+    hinge.position.y = kind === "plate" ? 1.25 : 1.05;
+    const plate = new THREE.Mesh(kind === "plate" ? plateG : ipscG, steelM.clone());
+    plate.position.y = kind === "plate" ? -0.15 : -0.76;
+    plate.castShadow = true;
+    plate.userData.surface = "steel";
+    plate.userData.target = t;
+    hinge.add(plate);
+    t.add(hinge);
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.05, hinge.position.y + 0.04, 0.05), postM);
+    post.position.set(0.04, (hinge.position.y + 0.04) / 2, 0);
+    t.add(post);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.5), postM);
+    foot.position.y = 0.025;
+    t.add(foot);
+    if (label) {
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.36), new THREE.MeshStandardMaterial({ roughness: 0.8, map: canvasTex(256, 102, (g, w, h) => {
+        g.fillStyle = "#e8e3d4";
+        g.fillRect(0, 0, w, h);
+        g.fillStyle = "#222";
+        g.font = "bold 64px Arial";
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText(label, w / 2, h / 2 + 4);
+      }) }));
+      sign.position.set(-0.3, 0.3, z > 0 ? -0.6 : 0.6);
+      sign.rotation.y = -Math.PI / 2;
+      t.add(sign);
+    }
+    t.userData = { hinge, plate, swing: 0, vel: 0, kind };
+    grp.add(t);
+    targets.push(t);
+    return t;
+  };
+  addTarget(15, 1.2, "ipsc", "15 м");
+  addTarget(15, -1.8, "plate");
+  addTarget(25, -0.6, "ipsc", "25 м");
+  addTarget(25, 2.4, "plate");
+  addTarget(50, 1.4, "ipsc", "50 м");
+  addTarget(50, -3, "plate");
+  addTarget(100, -1, "ipsc", "100 м");
+  addTarget(100, 3.5, "ipsc");
+  const hitables = [ground, berm, ...targets.map((t) => t.userData.plate)];
+  grp.traverse((o) => {
+    if (o.isMesh && o !== ground) o.receiveShadow = true;
+  });
+  const update = (dt) => {
+    for (const t of targets) {
+      const u = t.userData;
+      u.vel += (-u.swing * 60 - u.vel * 4.5) * dt;
+      u.swing += u.vel * dt;
+      u.hinge.rotation.z = -u.swing;
+    }
+  };
+  const hit = (t, energy) => {
+    t.userData.vel += energy;
+  };
+  return { group: grp, targets, hitables, update, hit, ground };
+}
+
+// src/engine/materials.js
+import * as THREE2 from "three";
+function rng(seed) {
+  let s = seed >>> 0;
+  return () => (s = s * 1664525 + 1013904223 >>> 0) / 4294967296;
+}
+function valueNoise(size, cells, seed) {
+  const r = rng(seed);
+  const grid = new Float32Array((cells + 1) * (cells + 1));
+  for (let i = 0; i < grid.length; i++) grid[i] = r();
+  for (let i = 0; i <= cells; i++) {
+    grid[i * (cells + 1) + cells] = grid[i * (cells + 1)];
+    grid[cells * (cells + 1) + i] = grid[i];
+  }
+  const out = new Float32Array(size * size);
+  const sm = (t) => t * t * (3 - 2 * t);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const gx = x / size * cells, gy = y / size * cells;
+    const x0 = Math.floor(gx), y0 = Math.floor(gy), fx = sm(gx - x0), fy = sm(gy - y0);
+    const g = (i, j) => grid[j * (cells + 1) + i];
+    const a = g(x0, y0) + (g(x0 + 1, y0) - g(x0, y0)) * fx;
+    const b = g(x0, y0 + 1) + (g(x0 + 1, y0 + 1) - g(x0, y0 + 1)) * fx;
+    out[y * size + x] = a + (b - a) * fy;
+  }
+  return out;
+}
+function fbm(size, octaves, seed, base = 4) {
+  const out = new Float32Array(size * size);
+  let amp = 1, tot = 0;
+  for (let o = 0; o < octaves; o++) {
+    const n = valueNoise(size, base << o, seed + o * 17);
+    for (let i = 0; i < out.length; i++) out[i] += n[i] * amp;
+    tot += amp;
+    amp *= 0.5;
+  }
+  for (let i = 0; i < out.length; i++) out[i] /= tot;
+  return out;
+}
+function toTex(size, fill, srgb) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  const img = ctx.createImageData(size, size);
+  for (let i = 0; i < size * size; i++) {
+    const [r, g, b] = fill(i);
+    img.data[i * 4] = r;
+    img.data[i * 4 + 1] = g;
+    img.data[i * 4 + 2] = b;
+    img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE2.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE2.RepeatWrapping;
+  t.anisotropy = 4;
+  if (srgb) t.colorSpace = THREE2.SRGBColorSpace;
+  return t;
+}
+function normalFrom(h, size, strength) {
+  return toTex(size, (i) => {
+    const x = i % size, y = i / size | 0;
+    const hx = h[y * size + (x + 1) % size] - h[y * size + (x - 1 + size) % size];
+    const hy = h[(y + 1) % size * size + x] - h[(y - 1 + size) % size * size + x];
+    let nx = -hx * strength, ny = -hy * strength, nz = 1;
+    const l = Math.hypot(nx, ny, nz);
+    return [(nx / l * 0.5 + 0.5) * 255, (ny / l * 0.5 + 0.5) * 255, (nz / l * 0.5 + 0.5) * 255];
+  });
+}
+function roughFrom(h, size, lo, hi) {
+  return toTex(size, (i) => {
+    const v = (lo + (hi - lo) * h[i]) * 255;
+    return [v, v, v];
+  });
+}
+function makeTextures() {
+  const S = 256;
+  const coarse = fbm(S, 5, 11, 4);
+  const fine = fbm(S, 3, 77, 32);
+  const stipple = fbm(S, 2, 123, 64);
+  const brushed = new Float32Array(S * S);
+  const br = fbm(S, 4, 5, 8);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) brushed[y * S + x] = br[y * S + x * 7 % S] * 0.3 + br[y * 3 % S * S + x] * 0.7;
+  const mix = new Float32Array(S * S);
+  for (let i = 0; i < mix.length; i++) mix[i] = coarse[i] * 0.55 + fine[i] * 0.45;
+  const wood = (hue) => {
+    const n = fbm(S, 4, 301, 4), n2 = fbm(S, 3, 555, 16);
+    return toTex(S, (i) => {
+      const x = i % S, y = i / S | 0;
+      const v = y / S + n[i] * 0.35 + n2[i] * 0.04;
+      const ring = Math.pow(Math.abs(Math.sin(v * Math.PI * 9)), 6);
+      const fib = n2[y * S + x * 5 % S] * 0.25;
+      const k = 0.78 + fib - ring * 0.32 + (coarse[i] - 0.5) * 0.18;
+      return [hue[0] * k, hue[1] * k, hue[2] * k];
+    }, true);
+  };
+  const woodH = new Float32Array(S * S);
+  {
+    const n = fbm(S, 4, 301, 4);
+    for (let i = 0; i < S * S; i++) {
+      const y = (i / S | 0) / S;
+      woodH[i] = Math.pow(Math.abs(Math.sin((y + n[i] * 0.35) * Math.PI * 9)), 6);
+    }
+  }
+  return {
+    rough: roughFrom(mix, S, 0.72, 1),
+    roughStrong: roughFrom(coarse, S, 0.55, 1),
+    roughBrushed: roughFrom(brushed, S, 0.7, 1),
+    nMetal: normalFrom(fine, S, 1.4),
+    nCast: normalFrom(mix, S, 3.2),
+    nPoly: normalFrom(stipple, S, 5.5),
+    nWood: normalFrom(woodH, S, 1.6),
+    woodBirch: wood([196, 92, 48]),
+    woodWalnut: wood([120, 70, 40])
+  };
+}
+function createMaterials(envMap) {
+  const tex = makeTextures();
+  const rep = (t, mm) => {
+    const c = t.clone();
+    c.needsUpdate = true;
+    c.repeat.set(1 / mm, 1 / mm);
+    return c;
+  };
+  const R = {};
+  const std = (o) => new THREE2.MeshStandardMaterial(o);
+  const phys = (o) => new THREE2.MeshPhysicalMaterial(o);
+  const metal = (color, rough, metal2, o = {}) => std({
+    color,
+    roughness: rough,
+    metalness: metal2,
+    roughnessMap: rep(o.brushed ? tex.roughBrushed : tex.rough, o.tile ?? 70),
+    normalMap: rep(o.cast ? tex.nCast : tex.nMetal, o.tile ?? 70),
+    normalScale: new THREE2.Vector2(o.ns ?? 0.35, o.ns ?? 0.35),
+    envMapIntensity: o.env ?? 1
+  });
+  const poly = (color, rough, o = {}) => std({
+    color,
+    roughness: rough,
+    metalness: 0,
+    roughnessMap: rep(tex.rough, 50),
+    normalMap: rep(tex.nPoly, o.tile ?? 24),
+    normalScale: new THREE2.Vector2(o.ns ?? 0.45, o.ns ?? 0.45),
+    envMapIntensity: o.env ?? 0.8
+  });
+  R.steel = metal(2829358, 0.42, 0.8);
+  R.steelPark = metal(3487030, 0.62, 0.55, { cast: true, ns: 0.5 });
+  R.steelWorn = metal(5592666, 0.36, 0.9, { brushed: true });
+  R.steelBright = metal(10987949, 0.26, 1, { brushed: true });
+  R.chrome = metal(13224910, 0.14, 1);
+  R.alu = metal(2039842, 0.46, 0.55, { ns: 0.25 });
+  R.aluGrey = metal(3882304, 0.44, 0.6, { ns: 0.25 });
+  R.aluFde = metal(9402968, 0.58, 0.25, { cast: true, ns: 0.35, env: 0.8 });
+  R.aluOd = metal(4999992, 0.6, 0.25, { cast: true });
+  R.cast = metal(2500393, 0.66, 0.55, { cast: true, ns: 0.7 });
+  R.brass = metal(13148240, 0.3, 1);
+  R.copper = metal(11889982, 0.32, 1);
+  R.steelCase = metal(6249532, 0.45, 0.6);
+  R.spring = metal(4868942, 0.35, 0.9);
+  R.poly = poly(1776412, 0.74);
+  R.polySoft = poly(2105377, 0.86, { ns: 0.7 });
+  R.polyFde = poly(9995359, 0.78);
+  R.polyFdeDark = poly(7299144, 0.8);
+  R.polyPlum = poly(4991522, 0.58, { ns: 0.3 });
+  R.polyOd = poly(4868662, 0.78);
+  R.polyGrey = poly(3948097, 0.7);
+  R.polyTan = poly(11573876, 0.78);
+  R.rubber = poly(1315860, 0.92, { ns: 0.9, tile: 14 });
+  R.bakelite = std({ color: 8006672, roughness: 0.42, metalness: 0, normalMap: rep(tex.nCast, 60), normalScale: new THREE2.Vector2(0.2, 0.2), roughnessMap: rep(tex.rough, 60) });
+  R.wood = phys({
+    color: 16777215,
+    map: rep(tex.woodBirch, 160),
+    roughness: 0.52,
+    metalness: 0,
+    normalMap: rep(tex.nWood, 160),
+    normalScale: new THREE2.Vector2(0.25, 0.25),
+    clearcoat: 0.35,
+    clearcoatRoughness: 0.4
+  });
+  R.woodDark = phys({
+    color: 16777215,
+    map: rep(tex.woodWalnut, 160),
+    roughness: 0.5,
+    metalness: 0,
+    normalMap: rep(tex.nWood, 160),
+    normalScale: new THREE2.Vector2(0.25, 0.25),
+    clearcoat: 0.3,
+    clearcoatRoughness: 0.45
+  });
+  const glass = (color, op) => phys({
+    color,
+    roughness: 0.04,
+    metalness: 0.1,
+    transparent: true,
+    opacity: op,
+    depthWrite: false,
+    envMapIntensity: 2.2,
+    clearcoat: 1,
+    clearcoatRoughness: 0.02,
+    side: THREE2.DoubleSide
+  });
+  R.glass = glass(10404568, 0.16);
+  R.glassAmber = glass(14066522, 0.2);
+  R.glassRed = glass(14711402, 0.2);
+  R.glassBlue = glass(6983648, 0.22);
+  R.glassDark = glass(2241348, 0.55);
+  R.lensBlack = std({ color: 329223, roughness: 0.25, metalness: 0.2 });
+  R.emRed = std({ color: 2228224, emissive: 16722458, emissiveIntensity: 3, roughness: 0.4 });
+  R.emGreen = std({ color: 8704, emissive: 7208794, emissiveIntensity: 2.5, roughness: 0.4 });
+  R.tritium = std({ color: 1714704, emissive: 9240426, emissiveIntensity: 1.2, roughness: 0.4 });
+  R.lampLens = std({ color: 14542574, emissive: 16774108, emissiveIntensity: 0, roughness: 0.08, metalness: 0.2 });
+  R.laserLens = std({ color: 3346448, emissive: 16719888, emissiveIntensity: 0, roughness: 0.1 });
+  R.irLens = std({ color: 1381653, roughness: 0.05, metalness: 0.4 });
+  R.white = std({ color: 15263456, roughness: 0.5 });
+  R.paintRed = std({ color: 11805724, roughness: 0.5 });
+  R.paintWhite = std({ color: 14605266, roughness: 0.55 });
+  R.paper = std({ color: 15328211, roughness: 0.95 });
+  R.target = std({ color: 13617334, roughness: 0.6, metalness: 0.2 });
+  for (const m of Object.values(R)) if (envMap && m.envMap === null) m.envMap = null;
+  const cache = /* @__PURE__ */ new Map();
+  return {
+    tex,
+    all: R,
+    get(key) {
+      if (typeof key !== "string") return key;
+      if (R[key]) return R[key];
+      if (cache.has(key)) return cache.get(key);
+      const [base, col] = key.split("#");
+      if (R[base] && col) {
+        const m = R[base].clone();
+        m.color = new THREE2.Color("#" + col);
+        cache.set(key, m);
+        return m;
+      }
+      console.warn("нет материала", key);
+      return R.poly;
+    }
+  };
+}
+
+// src/engine/ctx.js
+import * as THREE5 from "three";
+
+// src/engine/geo.js
+var geo_exports = {};
+__export(geo_exports, {
+  D2R: () => D2R,
+  Kit: () => Kit,
+  PICA: () => PICA,
+  T: () => T,
+  THREE: () => THREE3,
+  box: () => box,
+  circle: () => circle,
+  cylX: () => cylX,
+  cylY: () => cylY,
+  cylZ: () => cylZ,
+  extrudeX: () => extrudeX,
+  extrudeY: () => extrudeY,
+  extrudeZ: () => extrudeZ,
+  flutesX: () => flutesX,
+  latheX: () => latheX,
+  loftX: () => loftX,
+  merge: () => merge,
+  mirrorZ: () => mirrorZ,
+  mlokHoles: () => mlokHoles,
+  node: () => node,
+  path: () => path,
+  picatinny: () => picatinny,
+  pin: () => pin,
+  place: () => place,
+  reverse: () => reverse,
+  ringGrooves: () => ringGrooves,
+  rrect: () => rrect,
+  screwHead: () => screwHead,
+  shape: () => shape,
+  slot: () => slot,
+  sphere: () => sphere,
+  spring: () => spring,
+  superEllipse: () => superEllipse,
+  tubeX: () => tubeX,
+  wire: () => wire
+});
+import * as THREE3 from "three";
+import { mergeGeometries, toCreasedNormals } from "three/addons/utils/BufferGeometryUtils.js";
+var D2R = Math.PI / 180;
+function path(pts, target) {
+  const s = target || new THREE3.Shape();
+  const n = pts.length;
+  const P = pts.map((p) => new THREE3.Vector2(p[0], p[1]));
+  const R = pts.map((p) => p[2] || 0);
+  const corner = (i) => {
+    const a = P[(i - 1 + n) % n], b = P[i], c = P[(i + 1) % n];
+    const r = R[i];
+    const la = b.distanceTo(a), lc = b.distanceTo(c);
+    const d = Math.min(r, la * 0.5, lc * 0.5);
+    const pa = b.clone().add(a.clone().sub(b).setLength(d));
+    const pc = b.clone().add(c.clone().sub(b).setLength(d));
+    return [pa, pc, b];
+  };
+  for (let i = 0; i < n; i++) {
+    if (R[i] > 0) {
+      const [pa, pc, b] = corner(i);
+      if (i === 0) s.moveTo(pa.x, pa.y);
+      else s.lineTo(pa.x, pa.y);
+      s.quadraticCurveTo(b.x, b.y, pc.x, pc.y);
+    } else if (i === 0) s.moveTo(P[i].x, P[i].y);
+    else s.lineTo(P[i].x, P[i].y);
+  }
+  s.closePath();
+  return s;
+}
+function shape(pts, holes = []) {
+  const s = path(pts);
+  for (const h of holes) s.holes.push(path(h, new THREE3.Path()));
+  return s;
+}
+function rrect(cx, cy, w, h, r = 0) {
+  const x0 = cx - w / 2, x1 = cx + w / 2, y0 = cy - h / 2, y1 = cy + h / 2;
+  return [[x0, y0, r], [x1, y0, r], [x1, y1, r], [x0, y1, r]];
+}
+function circle(cx, cy, r, n = 24) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2;
+    out.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+  }
+  return out;
+}
+function slot(x0, x1, cy, h, n = 8) {
+  const r = h / 2, out = [];
+  for (let i = 0; i <= n; i++) {
+    const a = -Math.PI / 2 + i / n * Math.PI;
+    out.push([x1 - r + Math.cos(a) * r, cy + Math.sin(a) * r]);
+  }
+  for (let i = 0; i <= n; i++) {
+    const a = Math.PI / 2 + i / n * Math.PI;
+    out.push([x0 + r + Math.cos(a) * r, cy + Math.sin(a) * r]);
+  }
+  return out;
+}
+function reverse(pts) {
+  return pts.slice().reverse();
+}
+function fixUV(g, k = 1) {
+  const uv = g.attributes.uv;
+  if (uv && k !== 1) for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * k, uv.getY(i) * k);
+  return g;
+}
+function finish(g, crease = 32) {
+  let out = g.index ? g.toNonIndexed() : g;
+  out = toCreasedNormals(out, crease * D2R);
+  if (!out.attributes.uv) out.setAttribute("uv", new THREE3.BufferAttribute(new Float32Array(out.attributes.position.count * 2), 2));
+  return out;
+}
+function extrudeZ(shp, width, o = {}) {
+  const b = Math.min(o.bevel ?? 0.6, width * 0.45);
+  const depth = Math.max(0.01, width - 2 * b);
+  const g = new THREE3.ExtrudeGeometry(Array.isArray(shp) ? shape(shp) : shp, {
+    depth,
+    steps: 1,
+    curveSegments: o.curve ?? 6,
+    bevelEnabled: b > 0,
+    bevelThickness: b,
+    bevelSize: b,
+    bevelOffset: -b,
+    bevelSegments: o.bevelSeg ?? 2
+  });
+  g.translate(0, 0, -depth / 2 + (o.z || 0));
+  return finish(g, o.crease);
+}
+function extrudeX(shp, x0, x1, o = {}) {
+  const len = x1 - x0;
+  const b = Math.min(o.bevel ?? 0.5, len * 0.45);
+  const depth = Math.max(0.01, len - 2 * b);
+  const g = new THREE3.ExtrudeGeometry(Array.isArray(shp) ? shape(shp) : shp, {
+    depth,
+    steps: 1,
+    curveSegments: o.curve ?? 6,
+    bevelEnabled: b > 0,
+    bevelThickness: b,
+    bevelSize: b,
+    bevelOffset: -b,
+    bevelSegments: o.bevelSeg ?? 2
+  });
+  g.rotateY(-Math.PI / 2);
+  g.translate(x1 - b, 0, 0);
+  return finish(g, o.crease);
+}
+function extrudeY(shp, y0, y1, o = {}) {
+  const len = y1 - y0;
+  const b = Math.min(o.bevel ?? 0.5, len * 0.45);
+  const depth = Math.max(0.01, len - 2 * b);
+  const g = new THREE3.ExtrudeGeometry(Array.isArray(shp) ? shape(shp) : shp, {
+    depth,
+    steps: 1,
+    curveSegments: o.curve ?? 6,
+    bevelEnabled: b > 0,
+    bevelThickness: b,
+    bevelSize: b,
+    bevelOffset: -b,
+    bevelSegments: o.bevelSeg ?? 2
+  });
+  g.rotateX(-Math.PI / 2);
+  g.scale(1, 1, -1);
+  const idx = g.index;
+  flipWinding(g);
+  g.translate(0, y0 + b, 0);
+  return finish(g, o.crease);
+}
+function flipWinding(g) {
+  const pos = g.attributes.position;
+  const attrs = Object.values(g.attributes);
+  for (let i = 0; i < pos.count; i += 3) {
+    for (const a of attrs) {
+      for (let c = 0; c < a.itemSize; c++) {
+        const t = a.array[(i + 1) * a.itemSize + c];
+        a.array[(i + 1) * a.itemSize + c] = a.array[(i + 2) * a.itemSize + c];
+        a.array[(i + 2) * a.itemSize + c] = t;
+      }
+    }
+  }
+}
+function latheX(prof, o = {}) {
+  const seg = o.seg ?? 32;
+  const a0 = (o.a0 ?? 0) * D2R, arc = (o.arc ?? 360) * D2R;
+  const crease = Math.cos((o.crease ?? 40) * D2R);
+  const pts = prof.filter((p, i) => i === 0 || p[0] !== prof[i - 1][0] || p[1] !== prof[i - 1][1]);
+  const segN = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const dx = pts[i + 1][0] - pts[i][0], dr = pts[i + 1][1] - pts[i][1];
+    const l = Math.hypot(dx, dr) || 1;
+    segN.push([-dr / l, dx / l]);
+  }
+  const pos = [], nor = [], uv = [], idx = [];
+  let vlen = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const nA = segN[i].slice(), nB = segN[i].slice();
+    if (i > 0) {
+      const p = segN[i - 1];
+      if (p[0] * nA[0] + p[1] * nA[1] > crease) {
+        nA[0] += p[0];
+        nA[1] += p[1];
+      }
+    }
+    if (i < segN.length - 1) {
+      const q = segN[i + 1];
+      if (q[0] * nB[0] + q[1] * nB[1] > crease) {
+        nB[0] += q[0];
+        nB[1] += q[1];
+      }
+    }
+    for (const n of [nA, nB]) {
+      const l = Math.hypot(n[0], n[1]) || 1;
+      n[0] /= l;
+      n[1] /= l;
+    }
+    const [x0, r0] = pts[i], [x1, r1] = pts[i + 1];
+    const sl = Math.hypot(x1 - x0, r1 - r0);
+    const base = pos.length / 3;
+    for (let j = 0; j <= seg; j++) {
+      const a = a0 + j / seg * arc;
+      const c = Math.cos(a), s = Math.sin(a);
+      pos.push(x0, r0 * c, r0 * s, x1, r1 * c, r1 * s);
+      nor.push(nA[0], nA[1] * c, nA[1] * s, nB[0], nB[1] * c, nB[1] * s);
+      const u = j / seg * arc * Math.max(r0, r1, 1);
+      uv.push(u, vlen, u, vlen + sl);
+    }
+    vlen += sl;
+    for (let j = 0; j < seg; j++) {
+      const a = base + j * 2, b = a + 1, c = a + 2, d = a + 3;
+      idx.push(a, c, b, b, c, d);
+    }
+  }
+  const g = new THREE3.BufferGeometry();
+  g.setAttribute("position", new THREE3.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE3.Float32BufferAttribute(nor, 3));
+  g.setAttribute("uv", new THREE3.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  return g.toNonIndexed();
+}
+function cylX(r, x0, x1, o = {}) {
+  const c = Math.min(o.c ?? 0.4, r * 0.4, (x1 - x0) * 0.3);
+  const ri = o.ri || 0;
+  if (ri > 0) {
+    return latheX([[x0, ri + c], [x0, r - c], [x0 + c, r], [x1 - c, r], [x1, r - c], [x1, ri + c], [x1 - c, ri], [x0 + c, ri], [x0, ri + c]], o);
+  }
+  return latheX([[x0, 0], [x0, r - c], [x0 + c, r], [x1 - c, r], [x1, r - c], [x1, 0]], o);
+}
+function tubeX(rOut, rIn, x0, x1, o = {}) {
+  return cylX(rOut, x0, x1, { ...o, ri: rIn });
+}
+function cylY(r, y0, y1, o = {}) {
+  return T(cylX(r, y0, y1, o), { r: [0, 0, 90] });
+}
+function cylZ(r, z0, z1, o = {}) {
+  return T(cylX(r, z0, z1, o), { r: [0, -90, 0] });
+}
+function sphere(r, o = {}) {
+  const g = new THREE3.SphereGeometry(r, o.seg ?? 20, o.seg2 ?? 14);
+  return fixUV(g.toNonIndexed(), r * 3);
+}
+function box(w, h, d, o = {}) {
+  const b = Math.min(o.bevel ?? 0.5, w * 0.45, h * 0.45, d * 0.45);
+  return extrudeZ(rrect(0, 0, w, h, o.r ?? b), d, { bevel: b, curve: 3 });
+}
+var _m = new THREE3.Matrix4();
+var _q = new THREE3.Quaternion();
+var _e = new THREE3.Euler();
+var _v = new THREE3.Vector3();
+var _s = new THREE3.Vector3();
+function T(g, t = {}) {
+  const r = t.r || [0, 0, 0];
+  _e.set(r[0] * D2R, r[1] * D2R, r[2] * D2R, t.order || "XYZ");
+  _q.setFromEuler(_e);
+  const s = t.s == null ? [1, 1, 1] : Array.isArray(t.s) ? t.s : [t.s, t.s, t.s];
+  _s.set(s[0], s[1], s[2]);
+  const p = t.p || [0, 0, 0];
+  _v.set(p[0], p[1], p[2]);
+  _m.compose(_v, _q, _s);
+  g.applyMatrix4(_m);
+  if (s[0] * s[1] * s[2] < 0) flipWinding(g);
+  return g;
+}
+function mirrorZ(g) {
+  return T(g.clone(), { s: [1, 1, -1] });
+}
+function merge(list) {
+  const gs = list.filter(Boolean).map((g) => {
+    let o = g.index ? g.toNonIndexed() : g;
+    for (const k of Object.keys(o.attributes)) if (!["position", "normal", "uv"].includes(k)) o.deleteAttribute(k);
+    if (!o.attributes.uv) o.setAttribute("uv", new THREE3.BufferAttribute(new Float32Array(o.attributes.position.count * 2), 2));
+    if (!o.attributes.normal) o.computeVertexNormals();
+    return o;
+  });
+  if (!gs.length) return null;
+  return mergeGeometries(gs, false);
+}
+var Kit = class {
+  constructor(mats) {
+    this.mats = mats;
+    this.buckets = /* @__PURE__ */ new Map();
+  }
+  add(mat, geo, t) {
+    if (!geo) return this;
+    if (Array.isArray(geo)) {
+      for (const g of geo) this.add(mat, g, t);
+      return this;
+    }
+    if (t) T(geo, t);
+    if (!this.buckets.has(mat)) this.buckets.set(mat, []);
+    this.buckets.get(mat).push(geo);
+    return this;
+  }
+  // Добавить с зеркальной копией на левый борт.
+  pair(mat, geo, t) {
+    if (t) T(geo, t);
+    this.add(mat, geo);
+    this.add(mat, mirrorZ(geo));
+    return this;
+  }
+  build(name) {
+    const grp = new THREE3.Group();
+    grp.name = name || "";
+    for (const [mk, list] of this.buckets) {
+      const g = merge(list);
+      if (!g) continue;
+      const m = new THREE3.Mesh(g, this.mats.get(mk));
+      m.castShadow = true;
+      m.receiveShadow = true;
+      m.userData.mat = mk;
+      grp.add(m);
+    }
+    this.buckets.clear();
+    return grp;
+  }
+};
+function node(name, children = [], t) {
+  const g = new THREE3.Group();
+  g.name = name;
+  for (const c of children) if (c) g.add(c);
+  if (t) place(g, t);
+  return g;
+}
+function place(obj, t = {}) {
+  if (t.p) obj.position.set(t.p[0], t.p[1], t.p[2]);
+  if (t.r) obj.rotation.set(t.r[0] * D2R, t.r[1] * D2R, t.r[2] * D2R, t.order || "XYZ");
+  if (t.s != null) Array.isArray(t.s) ? obj.scale.set(...t.s) : obj.scale.setScalar(t.s);
+  return obj;
+}
+var PICA = { PITCH: 10.01, SLOT: 5.23, TOP: 15.6, WIDE: 21.2, H: 9.4 };
+function picaSection(top, base) {
+  const t = PICA.TOP / 2, w = PICA.WIDE / 2;
+  if (top <= -2.8) {
+    return [[-w, -3], [w, -3], [w, -3.3], [t, -6], [t, -base], [-t, -base], [-t, -6], [-w, -3.3]];
+  }
+  return [[-t, 0], [t, 0], [w, -2.8], [w, -3.3], [t, -6], [t, -base], [-t, -base], [-t, -6], [-w, -3.3], [-w, -2.8]];
+}
+function picatinny(len, o = {}) {
+  const base = o.base ?? PICA.H;
+  const nSlots = Math.max(1, Math.floor((len - 3) / PICA.PITCH));
+  const first = o.first ?? (len - (nSlots - 1) * PICA.PITCH) / 2;
+  const gs = [];
+  gs.push(extrudeX(picaSection(-3, base), 0, len, { bevel: 0.3 }));
+  let x = 0;
+  for (let i = 0; i <= nSlots; i++) {
+    const sx = first + i * PICA.PITCH - PICA.SLOT / 2;
+    const x1 = Math.min(len, i < nSlots ? sx : len);
+    if (x1 - x > 0.8) gs.push(extrudeX(picaSection(0, 6.2), x, x1, { bevel: 0.35 }));
+    x = sx + PICA.SLOT;
+  }
+  return { geo: merge(gs), slots: nSlots, first };
+}
+function mlokHoles(x0, x1, cy, o = {}) {
+  const pitch = o.pitch ?? 40, L = o.len ?? 32, H = o.h ?? 7;
+  const n = Math.floor((x1 - x0 + (pitch - L)) / pitch);
+  const start = x0 + (x1 - x0 - (n * pitch - (pitch - L))) / 2;
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(rrect(start + i * pitch + L / 2, cy, L, H, H / 2 - 0.2));
+  return out;
+}
+function screwHead(r = 2.4, h = 1.2, o = {}) {
+  const g = latheX([[0, 0], [0, r * 0.95], [h * 0.3, r], [h, r * 0.8], [h, 0]], { seg: o.seg ?? 16 });
+  return T(g, { r: [0, -90, 0] });
+}
+function pin(r = 2, len = 2) {
+  return cylZ(r, -len / 2, len / 2, { c: 0.25, seg: 14 });
+}
+function ringGrooves(r, x0, x1, n, depth = 0.5, o = {}) {
+  const prof = [[x0, 0], [x0, r]];
+  const step = (x1 - x0) / n;
+  for (let i = 0; i < n; i++) {
+    const a = x0 + i * step;
+    prof.push([a + step * 0.2, r], [a + step * 0.35, r - depth], [a + step * 0.65, r - depth], [a + step * 0.8, r]);
+  }
+  prof.push([x1, r], [x1, 0]);
+  return latheX(prof, { seg: o.seg ?? 28 });
+}
+function flutesX(r, x0, x1, n, w, h, o = {}) {
+  const gs = [];
+  for (let i = 0; i < n; i++) {
+    const a = i / n * 360 + (o.a0 || 0);
+    gs.push(T(box(x1 - x0, h, w, { bevel: Math.min(0.3, w * 0.3) }), { p: [(x0 + x1) / 2, r + h / 2 - 0.2, 0] }));
+    T(gs[gs.length - 1], { r: [a, 0, 0] });
+  }
+  return merge(gs);
+}
+function spring(R, wire2, x0, x1, turns, o = {}) {
+  const pts = [];
+  const n = Math.max(24, Math.round(turns * 14));
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, a = t * turns * Math.PI * 2;
+    pts.push(new THREE3.Vector3(x0 + (x1 - x0) * t, Math.cos(a) * R, Math.sin(a) * R));
+  }
+  const curve = new THREE3.CatmullRomCurve3(pts);
+  return new THREE3.TubeGeometry(curve, n * 2, wire2, o.seg ?? 6, false).toNonIndexed();
+}
+function wire(points, r, o = {}) {
+  const curve = new THREE3.CatmullRomCurve3(points.map((p) => new THREE3.Vector3(...p)), !!o.closed, "catmullrom", o.tension ?? 0.5);
+  return new THREE3.TubeGeometry(curve, o.n ?? points.length * 10, r, o.seg ?? 8, !!o.closed).toNonIndexed();
+}
+function loftX(rings, o = {}) {
+  const pos = [], idx = [];
+  const m = rings[0].pts.length;
+  rings.forEach((r) => r.pts.forEach(([z, y]) => pos.push(r.x, y, z)));
+  for (let i = 0; i < rings.length - 1; i++) {
+    for (let j = 0; j < m; j++) {
+      const a = i * m + j, b = i * m + (j + 1) % m, c = (i + 1) * m + j, d = (i + 1) * m + (j + 1) % m;
+      idx.push(a, b, c, b, d, c);
+    }
+  }
+  const cap = (ri, flip) => {
+    const base = pos.length / 3;
+    const r = rings[ri];
+    let cz = 0, cy = 0;
+    r.pts.forEach(([z, y]) => {
+      cz += z / m;
+      cy += y / m;
+    });
+    pos.push(r.x, cy, cz);
+    for (let j = 0; j < m; j++) {
+      const a = ri * m + j, b = ri * m + (j + 1) % m;
+      flip ? idx.push(base, b, a) : idx.push(base, a, b);
+    }
+  };
+  if (o.caps !== false) {
+    cap(0, false);
+    cap(rings.length - 1, true);
+  }
+  const g = new THREE3.BufferGeometry();
+  g.setAttribute("position", new THREE3.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  if (o.flip) {
+    const ix = g.index.array;
+    for (let i = 0; i < ix.length; i += 3) {
+      const t = ix[i + 1];
+      ix[i + 1] = ix[i + 2];
+      ix[i + 2] = t;
+    }
+  }
+  const ng = g.toNonIndexed();
+  const uv = new Float32Array(ng.attributes.position.count * 2);
+  const p = ng.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    uv[i * 2] = p.getX(i);
+    uv[i * 2 + 1] = p.getY(i) + p.getZ(i);
+  }
+  ng.setAttribute("uv", new THREE3.BufferAttribute(uv, 2));
+  return toCreasedNormals(ng, (o.crease ?? 40) * D2R);
+}
+function superEllipse(a, b, k = 3, n = 32, cy = 0, cz = 0) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / n * Math.PI * 2;
+    const c = Math.cos(t), s = Math.sin(t);
+    out.push([cz + a * Math.sign(c) * Math.pow(Math.abs(c), 2 / k), cy + b * Math.sign(s) * Math.pow(Math.abs(s), 2 / k)]);
+  }
+  return out;
+}
+
+// src/engine/lib/common.js
+var common_exports = {};
+__export(common_exports, {
+  CAL: () => CAL,
+  bulletGeo: () => bulletGeo,
+  cartridge: () => cartridge,
+  caseGeo: () => caseGeo,
+  clampBody: () => clampBody,
+  crossBolt: () => crossBolt,
+  flipCap: () => flipCap,
+  hollowLathe: () => hollowLathe,
+  knob: () => knob,
+  lensDisc: () => lensDisc,
+  qdLever: () => qdLever
+});
+function clampBody(x0, x1, y1, o = {}) {
+  const w = (o.w ?? 26) / 2, jaw = o.jaw ?? -6.6;
+  const sec = [[-w, jaw, 1], [-w + 1.6, jaw - 0.2], [w - 1.6, jaw - 0.2], [w, jaw, 1], [w, y1, o.r ?? 1.2], [-w, y1, o.r ?? 1.2]];
+  return extrudeX(sec, x0, x1, { bevel: o.bevel ?? 0.8 });
+}
+function crossBolt(x, y = -2.5, w = 13, o = {}) {
+  const nut = T(cylZ(o.nutR ?? 4.2, 0, o.nutH ?? 3.2, { seg: 6, c: 0.3 }), { p: [x, y, w] });
+  const head = T(cylZ(o.headR ?? 3.4, 0, 1.6, { seg: 18, c: 0.4 }), { p: [x, y, -w - 1.6] });
+  return [nut, head];
+}
+function qdLever(x0, x1, y, w = 13) {
+  const len = x1 - x0;
+  const pro = [[0, 0, 0.5], [len, 0, 2], [len, 7, 3], [len * 0.2, 6.5, 2], [0, 4, 1]];
+  const g = extrudeZ(pro, 3.6, { bevel: 0.8 });
+  const pivot = cylZ(3.6, -1.2, 1.2, { seg: 16 });
+  return [T(g, { p: [x0, y - 3, -w - 1.6] }), T(pivot, { p: [x1 - 3, y, -w - 2.8] })];
+}
+function knob(r, h, grooves = 24, o = {}) {
+  const gs = [cylX(r - 0.6, 0, h, { c: 0.6, seg: 32 })];
+  if (grooves) gs.push(flutesX(r - 0.9, 0.6, h - (o.lipH ?? 0.8), grooves, 1.1, 0.9));
+  return merge(gs);
+}
+function flipCap(r, t = 2.4) {
+  const disc = cylX(r + 1.6, 0, t, { c: 0.6, seg: 28 });
+  const hinge = T(box(6, 5, 10, { bevel: 1 }), { p: [t / 2, r + 3, 0] });
+  const tab = T(box(3, 7, 8, { bevel: 1 }), { p: [t / 2, -r - 4, 0] });
+  return merge([disc, hinge, tab]);
+}
+function lensDisc(r, x, t = 1.2) {
+  return cylX(r, x - t / 2, x + t / 2, { c: 0.2, seg: 32 });
+}
+function hollowLathe(prof, rIn, o = {}) {
+  const back = [];
+  const x0 = prof[0][0], x1 = prof[prof.length - 1][0];
+  const inner = typeof rIn === "number" ? [[x1, rIn], [x0, rIn]] : rIn.slice().reverse();
+  return latheX([[x0, inner[inner.length - 1][1]], ...prof, ...inner, [x0, inner[inner.length - 1][1]]], o);
+}
+var CAL = {
+  "556": { L: 44.7, rim: 9.6, sh: 9, neck: 6.4, shX: 36.5, oal: 57.4, steel: false },
+  "545": { L: 39.8, rim: 10, sh: 9.2, neck: 6.3, shX: 31.5, oal: 57, steel: true },
+  "762x39": { L: 38.6, rim: 11.35, sh: 10.1, neck: 8.6, shX: 30.5, oal: 56, steel: true },
+  "762x51": { L: 51.2, rim: 11.9, sh: 11.5, neck: 8.7, shX: 39.6, oal: 71.1, steel: false }
+};
+function caseGeo(cal) {
+  const c = CAL[cal] || CAL["556"];
+  const r = c.rim / 2, s = c.sh / 2, n = c.neck / 2;
+  return latheX([
+    [0, 0],
+    [0, r - 0.3],
+    [0.3, r],
+    [1.3, r],
+    [1.6, r - 0.8],
+    [2.4, r - 0.8],
+    [2.9, r - 0.15],
+    [c.shX, s],
+    [c.shX + (s - n) * 1.5, n],
+    [c.L, n],
+    [c.L, n - 0.4]
+  ], { seg: 18 });
+}
+function bulletGeo(cal) {
+  const c = CAL[cal] || CAL["556"];
+  const n = c.neck / 2 - 0.35, len = c.oal - c.L + 5;
+  const pts = [[c.L - 5, n]];
+  for (let i = 1; i <= 8; i++) {
+    const t = i / 8;
+    pts.push([c.L - 5 + len * (0.35 + 0.65 * t), n * Math.sqrt(Math.max(0, 1 - Math.pow(t, 1.8))) + 0.2 * (1 - t)]);
+  }
+  pts.push([c.L - 5 + len, 0]);
+  return latheX([[c.L - 5, 0], ...pts], { seg: 16, crease: 60 });
+}
+function cartridge(k, cal, t) {
+  const c = CAL[cal] || CAL["556"];
+  k.add(c.steel ? "steelCase" : "brass", caseGeo(cal), t && { ...t });
+  k.add("copper", bulletGeo(cal), t && { ...t });
+}
+
+// src/engine/mounts.js
+import * as THREE4 from "three";
+function mount(o) {
+  const n = new THREE4.Group();
+  n.name = "mount:" + o.id;
+  if (o.p) n.position.set(...o.p);
+  const face = o.face || "top";
+  if (face === "left") n.rotation.x = -Math.PI / 2;
+  else if (face === "right") n.rotation.x = Math.PI / 2;
+  else if (face === "bottom") n.rotation.x = Math.PI;
+  n.userData.mount = { pitch: PICA.PITCH, ...o, face };
+  return n;
+}
+function railMount(id, p, face, slots, extra = {}) {
+  return mount({ id, type: "pica", p, face, slots, ...extra });
+}
+var _m2 = new THREE4.Matrix4();
+var _v2 = new THREE4.Vector3();
+function toRoot(obj, root) {
+  const m = new THREE4.Matrix4();
+  const chain = [];
+  let o = obj;
+  while (o && o !== root) {
+    chain.push(o);
+    o = o.parent;
+  }
+  for (let i = chain.length - 1; i >= 0; i--) {
+    chain[i].updateMatrix();
+    m.multiply(chain[i].matrix);
+  }
+  return m;
+}
+var Assembler = class _Assembler {
+  // def — описание оружия, lib — общая библиотека модулей, ctx — {THREE, G, mats, Kit}
+  constructor(def, lib, ctx) {
+    this.def = def;
+    this.ctx = ctx;
+    this.parts = /* @__PURE__ */ new Map();
+    for (const p of [...lib, ...def.parts || []]) this.parts.set(p.id, p);
+    this.base = def.build(ctx);
+    this.root = new THREE4.Group();
+    this.root.name = def.id;
+    this.root.add(this.base.root);
+    this.cache = /* @__PURE__ */ new Map();
+    this.installed = /* @__PURE__ */ new Map();
+    this.mounts = /* @__PURE__ */ new Map();
+    this.config = {};
+  }
+  partList() {
+    return [...this.parts.values()];
+  }
+  part(id) {
+    return this.parts.get(id);
+  }
+  // Статическая совместимость: может ли модуль в принципе встать на это оружие.
+  static fits(part, slot2, def) {
+    if (!slot2.accepts.includes(part.cat)) return false;
+    if (part.only && !part.only.includes(def.id)) return false;
+    if (part.fit?.thread && !part.fit.thread.includes(slot2.thread || def.thread)) return false;
+    if (part.fit?.iface && slot2.iface && !part.fit.iface.includes(slot2.iface)) return false;
+    return true;
+  }
+  slotOptions(slot2) {
+    return this.partList().filter((p) => _Assembler.fits(p, slot2, this.def));
+  }
+  collectMounts() {
+    this.mounts.clear();
+    const walk = (o) => {
+      if (o.userData.mount) this.mounts.set(o.userData.mount.id, o);
+      for (const c of o.children) walk(c);
+    };
+    walk(this.root);
+  }
+  // Все допустимые позиции модуля на наборе планок, отсортированные вдоль оси.
+  railPositions(slot2, part, ignoreSlot) {
+    const out = [];
+    const foot = part.foot || [-5, 5];
+    for (const rid of slot2.rails || []) {
+      const m = this.mounts.get(rid);
+      if (!m) continue;
+      const md = m.userData.mount;
+      const accepts = part.mountTypes || ["pica"];
+      if (!accepts.includes(md.type)) continue;
+      const mat = toRoot(m, this.root);
+      const n = md.slots || 1;
+      for (let i = 0; i < n; i++) {
+        const lx = i * (md.pitch || PICA.PITCH);
+        if (md.type === "pica") {
+          const lo = -PICA.PITCH / 2 - 1.5, hi = (n - 1) * PICA.PITCH + PICA.PITCH / 2 + 1.5;
+          if (lx + foot[0] < lo - 0.01 || lx + foot[1] > hi + 0.01) continue;
+        }
+        const wx = _v2.set(lx, 0, 0).applyMatrix4(mat).x;
+        out.push({ rail: rid, i, x: wx, face: md.face, axis: md.axis || md.face });
+      }
+    }
+    out.sort((a, b) => a.x - b.x);
+    const body = part.body || part.foot || [-5, 5];
+    return out.map((p) => ({ ...p, clash: this.clash(p, body, ignoreSlot, slot2) }));
+  }
+  clash(p, body, ignoreSlot, slot2) {
+    const x0 = p.x + body[0], x1 = p.x + body[1];
+    for (const [sid, it] of this.installed) {
+      if (sid === ignoreSlot || !it.railPos) continue;
+      if (it.railPos.axis !== p.axis) continue;
+      const b = it.part.body || it.part.foot || [-5, 5];
+      const y0 = it.railPos.x + b[0], y1 = it.railPos.x + b[1];
+      if (x0 < y1 - 0.5 && y0 < x1 - 0.5) return this.def.slots.find((s) => s.id === sid)?.label || sid;
+    }
+    for (const z of this.def.keepOut || []) {
+      if (z.axis !== p.axis) continue;
+      if (z.slots && !z.slots.includes(slot2.id)) continue;
+      if (x0 < z.x1 && z.x0 < x1) return z.label;
+    }
+    return null;
+  }
+  built(slotId, part) {
+    const key = slotId + "|" + part.id;
+    if (!this.cache.has(key)) {
+      const res = part.build(this.ctx, { weapon: this.def, slot: slotId });
+      const obj = res.root || res;
+      obj.name = "part:" + part.id;
+      obj.userData.partId = part.id;
+      obj.userData.slotId = slotId;
+      obj.traverse((o) => {
+        if (o.isMesh) {
+          o.userData.partId = part.id;
+          o.userData.slotId = slotId;
+        }
+      });
+      this.cache.set(key, { obj, info: res.root ? res : { root: obj } });
+    }
+    return this.cache.get(key);
+  }
+  // Применяет конфигурацию {slotId: {id, pos}}; возвращает исправленную версию.
+  apply(config) {
+    for (const it of this.installed.values()) it.obj.parent?.remove(it.obj);
+    this.installed.clear();
+    const out = {};
+    const hidden = /* @__PURE__ */ new Set();
+    this.collectMounts();
+    for (const slot2 of this.def.slots) {
+      const want = config[slot2.id];
+      const pid = want && typeof want === "object" ? want.id : want;
+      if (!pid) {
+        out[slot2.id] = null;
+        continue;
+      }
+      const part = this.parts.get(pid);
+      if (!part || !_Assembler.fits(part, slot2, this.def)) {
+        out[slot2.id] = null;
+        continue;
+      }
+      if (part.needs && !part.needs(out, this)) {
+        out[slot2.id] = null;
+        continue;
+      }
+      let host = null, railPos = null;
+      if (slot2.rails) {
+        const ps = this.railPositions(slot2, part, slot2.id).filter((p) => !p.clash);
+        if (!ps.length) {
+          out[slot2.id] = null;
+          continue;
+        }
+        const wantPos = want && typeof want === "object" && want.pos != null ? want.pos : null;
+        let pick = null;
+        if (wantPos) pick = ps.find((p) => p.rail === wantPos.rail && p.i === wantPos.i);
+        if (!pick) {
+          const pref = slot2.prefer;
+          if (pref && typeof pref === "object") pick = ps.reduce((a, b) => Math.abs(b.x - pref.x) < Math.abs(a.x - pref.x) ? b : a);
+          else if (pref === "front") pick = ps[ps.length - 1];
+          else if (pref === "rear") pick = ps[0];
+          else pick = ps[Math.floor(ps.length / 2)];
+        }
+        railPos = pick;
+        host = this.mounts.get(pick.rail);
+      } else {
+        host = this.mounts.get(slot2.mount);
+      }
+      if (!host) {
+        out[slot2.id] = null;
+        continue;
+      }
+      const { obj, info } = this.built(slot2.id, part);
+      obj.position.set(railPos ? railPos.i * (host.userData.mount.pitch || PICA.PITCH) : 0, 0, 0);
+      obj.rotation.set(0, 0, 0);
+      host.add(obj);
+      this.installed.set(slot2.id, { part, obj, info, host, railPos, slot: slot2 });
+      for (const h of part.hides || []) hidden.add(h);
+      out[slot2.id] = { id: pid, pos: railPos ? { rail: railPos.rail, i: railPos.i } : null };
+      obj.traverse((o) => {
+        if (o.userData.mount) this.mounts.set(o.userData.mount.id, o);
+      });
+    }
+    this.base.root.traverse((o) => {
+      if (o.userData.hideKey) o.visible = !hidden.has(o.userData.hideKey);
+    });
+    this.config = out;
+    return out;
+  }
+  info(slotId) {
+    return this.installed.get(slotId)?.info || null;
+  }
+  // Все установленные модули с заданным свойством info (sight, light, laser ...).
+  withInfo(key) {
+    const out = [];
+    for (const [sid, it] of this.installed) if (it.info && it.info[key]) out.push({ slotId: sid, ...it, data: it.info[key] });
+    if (this.base[key]) out.unshift({ slotId: "_base", obj: this.base.root, data: this.base[key], info: this.base });
+    return out;
+  }
+  stats() {
+    const s = { ...this.def.base };
+    const mods = [];
+    for (const it of this.installed.values()) if (it.part.stats) mods.push(it.part.stats);
+    for (const m of mods) {
+      for (const [k, v] of Object.entries(m)) {
+        if (k === "mag") continue;
+        if (k.endsWith("%")) {
+          const kk = k.slice(0, -1);
+          s[kk] = (s[kk] ?? 0) * (1 + v / 100);
+        } else if (k === "loud" || k === "flash" || k === "velocity" || k === "rangeAdd") s[k] = (s[k] ?? 0) + v;
+        else s[k] = (s[k] ?? 0) + v;
+      }
+    }
+    for (const it of this.installed.values()) if (it.part.stats?.mag) s.mag = it.part.stats.mag;
+    return s;
+  }
+};
+
+// src/engine/ctx.js
+function makeCtx(mats) {
+  return {
+    THREE: THREE5,
+    G: geo_exports,
+    C: common_exports,
+    mats,
+    mount,
+    railMount,
+    kit: () => new Kit(mats),
+    // Узел, скрываемый при установке модуля с part.hides = [key]
+    hideable(obj, key) {
+      obj.userData.hideKey = key;
+      return obj;
+    }
+  };
+}
+
+// src/engine/app.js
+async function boot(def, lib) {
+  const host = document.getElementById("app");
+  const S = createScene(host);
+  const mats = createMaterials(S.env);
+  const ctx = makeCtx(mats);
+  const asm = new Assembler(def, lib, ctx);
+  const rig = new THREE6.Group();
+  rig.position.set(0, GUN_Y, 0);
+  S.scene.add(rig);
+  const gun = asm.root;
+  gun.scale.setScalar(1e-3);
+  rig.add(gun);
+  asm.apply(def.defaults);
+  const f = asm.base.focus || { center: [0, 0, 0], size: 900 };
+  const controls = new OrbitControls(S.camera, S.renderer.domElement);
+  controls.target.set(f.center[0] / 1e3, GUN_Y + f.center[1] / 1e3, f.center[2] / 1e3);
+  S.camera.position.set(controls.target.x - 0.1, controls.target.y + 0.12, controls.target.z + f.size / 1e3 * 1.25);
+  controls.enableDamping = true;
+  controls.update();
+  const boot2 = document.getElementById("boot");
+  if (boot2) boot2.classList.add("off");
+  const app = { S, asm, mats, ctx, rig, gun, controls, def };
+  window.__app = app;
+  const loop = () => {
+    controls.update();
+    S.renderer.render(S.scene, S.camera);
+    requestAnimationFrame(loop);
+  };
+  loop();
+  return app;
+}
+
+// src/engine/lib/index.js
+var LIB = [];
+
+// src/weapons/m416_parts.js
+var RAIL_TOP = 30.5;
+function quadRail(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit();
+  const x0 = 2, x1 = 252;
+  const a = 26, f = 10.5;
+  const oct = [[-f, a], [f, a], [a, f], [a, -f], [f, -a], [-f, -a], [-a, -f], [-a, f]].map((p) => [...p, 2.2]);
+  k.add("alu", G.extrudeX(G.shape(oct, [G.circle(0, 2, 17.5, 32)]), x0, x1 - 10, { bevel: 1.2 }));
+  const ring = [[-f - 2, a + 1.5], [f + 2, a + 1.5], [a + 1.5, f + 2], [a + 1.5, -f - 2], [f + 2, -a - 1.5], [-f - 2, -a - 1.5], [-a - 1.5, -f - 2], [-a - 1.5, f + 2]].map((p) => [...p, 3]);
+  k.add("alu", G.extrudeX(G.shape(ring, [G.circle(0, 2, 17.5, 32)]), x1 - 12, x1, { bevel: 1.4 }));
+  k.add("alu", G.extrudeX(G.shape(ring, [G.circle(0, 0, 16, 32)]), x0, x0 + 9, { bevel: 1.2 }));
+  for (const s of [-1, 1]) for (const x of [14, 30]) k.add("steel", G.T(G.screwHead(2.6, 1.4), { r: [s * 45 - 90 + 90, 0, 0], p: [x, 0, 0] }), null);
+  const len = x1 - x0 - 2;
+  const r = G.picatinny(len, { base: RAIL_TOP - a + 0.5 });
+  const mounts = [];
+  const faces = [["hgTop", "top", [0, 0, 0], [0, RAIL_TOP, 0]], ["hgRight", "right", [90, 0, 0], [0, 0, RAIL_TOP]], ["hgBottom", "bottom", [180, 0, 0], [0, -RAIL_TOP, 0]], ["hgLeft", "left", [-90, 0, 0], [0, 0, -RAIL_TOP]]];
+  for (const [id, face, rot, off] of faces) {
+    const rr = G.picatinny(len, { base: RAIL_TOP - a + 0.5 });
+    k.add("alu", rr.geo, { r: rot, p: [x0 + 1 + off[0], off[1], off[2]] });
+    const p = [x0 + 1 + rr.first, off[1], off[2]];
+    mounts.push(ctx.railMount(id, p, face, rr.slots, { axis: face }));
+  }
+  const root = G.node("hk_quad", [k.build(), ...mounts]);
+  return { root };
+}
+function mlokRail(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit();
+  const x0 = 2, x1 = 262, R = 24, t = 3.2;
+  const w = 2 * R * Math.tan(Math.PI / 8) + 0.6;
+  for (let i = 0; i < 8; i++) {
+    const a = i * 45;
+    if (a === 0) continue;
+    const holes = G.mlokHoles(x0 + 26, x1 - 14, 0, { pitch: 40 });
+    const plate = G.shape(G.rrect((x0 + x1) / 2, 0, x1 - x0, w, 0.8), a % 90 === 0 ? holes : holes.filter((_, j) => j % 2 === 1));
+    const g = G.extrudeZ(plate, t, { bevel: 0.6, z: R - t / 2 });
+    k.add("alu", G.T(g, { r: [a - 90, 0, 0] }));
+  }
+  k.add("alu", G.extrudeX(G.rrect(0, R - 2, w + 1, 5, 1), x0, x1, { bevel: 0.6 }));
+  k.add("alu", G.extrudeX(G.shape(G.circle(0, 0, R + 2.5, 8).map((p) => [p[0], p[1], 2]), [G.circle(0, 0, 16, 32)]), x0, x0 + 12, { bevel: 1 }), null);
+  k.add("alu", G.extrudeX(G.shape(G.circle(0, 0, R + 1.5, 8).map((p) => [p[0], p[1], 2]), [G.circle(0, 0, 17, 32)]), x1 - 6, x1, { bevel: 1 }), null);
+  const mounts = [];
+  const top = G.picatinny(x1 - x0 - 2, { base: RAIL_TOP - R + 0.5 });
+  k.add("alu", top.geo, { p: [x0 + 1, RAIL_TOP, 0] });
+  mounts.push(ctx.railMount("hgTop", [x0 + 1 + top.first, RAIL_TOP, 0], "top", top.slots, { axis: "top" }));
+  const sections = [["hgBottom", "bottom", 180, 102, [0, -R - 0.2, 0]], ["hgRight", "right", 90, 72, [0, 0, R + 0.2]], ["hgLeft", "left", -90, 72, [0, 0, -R - 0.2]]];
+  for (const [id, face, rot, len, off] of sections) {
+    const xs = x1 - 18 - len;
+    const rr = G.picatinny(len, { base: 5 });
+    const sk = ctx.kit();
+    sk.add("alu", rr.geo, { p: [0, 9.4, 0] });
+    sk.add("steel", G.T(G.screwHead(2.6, 1.2), { r: [-90, 0, 0] }), { p: [len * 0.25, 9.6, 0] });
+    sk.add("steel", G.T(G.screwHead(2.6, 1.2), { r: [-90, 0, 0] }), { p: [len * 0.75, 9.6, 0] });
+    const sec = sk.build();
+    const holder = G.node("sec:" + id, [sec]);
+    holder.position.set(xs, off[1], off[2]);
+    holder.rotation.x = rot * Math.PI / 180;
+    mounts.push(holder);
+    const m = ctx.railMount(id, [xs + rr.first, (off[1] ? Math.sign(off[1]) : 0) * (R + 9.6), (off[2] ? Math.sign(off[2]) : 0) * (R + 9.6)], face, rr.slots, { axis: face });
+    mounts.push(m);
+  }
+  return { root: G.node("hk_mlok", [k.build(), ...mounts]) };
+}
+function hkFront(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit(), f = ctx.kit();
+  k.add("alu", ctx.C.clampBody(-11, 11, 5));
+  k.add("steel", ctx.C.crossBolt(0));
+  const ear = [[-9, 0, 1], [7, 0, 1], [7, 26, 3], [3, 40, 3], [-3, 40, 3], [-9, 22, 2]];
+  f.add("alu", G.extrudeZ(ear, 3, { bevel: 0.6, z: 6.5 }));
+  f.add("alu", G.extrudeZ(ear, 3, { bevel: 0.6, z: -6.5 }));
+  f.add("alu", G.extrudeZ([[-9, 0, 1], [7, 0, 1], [7, 12, 2], [-9, 10, 2]], 16, { bevel: 0.8 }));
+  f.add("steel", G.cylY(1.9, 10, 30.5, { seg: 12, c: 0.3 }));
+  f.add("steel", G.extrudeZ([[-1, 30], [1, 30], [0.8, 35.5, 0.3], [-0.8, 35.5, 0.3]], 1.6, { bevel: 0.2 }));
+  f.add("tritium", G.T(G.sphere(0.55), { p: [-0.9, 34.4, 0] }));
+  const flip = G.node("flip", [f.build()]);
+  flip.position.set(-9, 5, 0);
+  flip.children[0].position.set(9, -5, 0);
+  return { root: G.node("hk_front", [k.build(), flip]), irons: { front: [0, 35.5, 0] }, flip: { node: flip, angle: 90 } };
+}
+function hkDiopter(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit(), f = ctx.kit();
+  k.add("alu", ctx.C.clampBody(-15, 15, 5.5));
+  k.add("steel", ctx.C.crossBolt(0));
+  const ear = [[-12, 0, 1], [12, 0, 1], [12, 30, 3], [7, 46, 4], [-7, 46, 4], [-12, 30, 3]];
+  f.add("alu", G.extrudeZ(ear, 3, { bevel: 0.6, z: 11 }));
+  f.add("alu", G.extrudeZ(ear, 3, { bevel: 0.6, z: -11 }));
+  f.add("alu", G.extrudeZ([[-12, 0, 1], [12, 0, 1], [12, 22, 2], [-12, 22, 2]], 25, { bevel: 0.8 }));
+  f.add("steel", G.T(G.tubeX(9.5, 1.3, -8.5, 8.5, { seg: 28, c: 0.6 }), { r: [0, 0, 90], p: [0, 35.5, 0] }));
+  f.add("steel", G.T(G.cylZ(9.8, -8.5, 8.5, { seg: 28 }), { p: [0, 35.5, 0] }));
+  f.add("lensBlack", G.T(G.cylX(1.2, -10.2, 10.2, { seg: 12 }), { p: [0, 35.5, 0] }));
+  f.add("steel", G.T(G.cylZ(5, 9.5, 12.4, { seg: 20 }), { p: [0, 35.5, 0] }));
+  const flip = G.node("flip", [f.build()]);
+  flip.position.set(12, 5.5, 0);
+  flip.children[0].position.set(-12, -5.5, 0);
+  return { root: G.node("hk_diopter", [k.build(), flip]), irons: { rear: [0, 35.5, 0], type: "aperture" }, flip: { node: flip, angle: -90 } };
+}
+function hkFlashHider(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit();
+  k.add("steel", G.latheX([[0, 0], [0, 10.8], [1, 11.2], [14, 11.2], [15, 10.5], [52, 10.5], [53.5, 9.6], [53.5, 6.6], [16, 6.6], [16, 0]], { seg: 32 }));
+  for (let i = 0; i < 6; i++) k.add("lensBlack", G.T(G.box(30, 2.6, 5, { bevel: 0.6 }), { p: [33, 8.8, 0], r: [i * 60, 0, 0] }));
+  k.add("steel", G.flutesX(10.8, 2, 12, 2, 5, 0.6, { a0: 90 }));
+  return { root: k.build("hk_fh"), muzzle: { x: 53.5, kind: "fh", flash: 0.35 } };
+}
+function stockHkSlim(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit();
+  const pro = [[152, -16, 3], [152, 16, 4], [88, 24, 30], [-10, 25, 6], [-10, -94, 8], [116, -20, 24]];
+  k.add("poly", G.extrudeZ(pro, 38, { bevel: 5, curve: 8 }));
+  const pan = G.shape([[96, -26, 5], [36, -24, 6], [2, -74, 6], [2, -30, 5]]);
+  for (const s of [-1, 1]) k.add("polySoft", G.extrudeZ(pan, 1.2, { bevel: 0.4, z: s * 18.6 }));
+  k.add("rubber", G.extrudeZ([[-10, 26, 3], [-26, 25, 5], [-27, -95, 5], [-10, -96, 3]], 41, { bevel: 4 }));
+  for (let i = 0; i < 9; i++) k.add("rubber", G.T(G.box(2, 3, 38), { p: [-27, 16 - i * 13, 0] }));
+  k.add("poly", G.extrudeZ([[112, -18, 2], [146, -16, 2], [146, -24, 3], [118, -26, 3]], 14, { bevel: 1.5 }));
+  for (const s of [-1, 1]) {
+    k.add("steel", G.cylZ(5.5, 0, 3, { seg: 18 }), { p: [14, -22, s > 0 ? 19 : -22] });
+    k.add("lensBlack", G.cylZ(3.2, 0, 0.8, { seg: 14 }), { p: [14, -22, s > 0 ? 21.6 : -22.4] });
+  }
+  return { root: k.build("hk_slim"), cheek: { x: 70, y: 25 } };
+}
+function stockCTR(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit();
+  const pro = G.shape(
+    [[150, -17, 3], [150, 17, 4], [118, 20, 6], [36, 22, 8], [-8, 24, 4], [-8, -92, 5], [8, -92, 4], [100, -21, 10]],
+    [[[92, -26, 3], [30, -26, 4], [8, -74, 4], [8, -30, 3]]]
+  );
+  k.add("poly", G.extrudeZ(pro, 36, { bevel: 3.5 }));
+  k.add("poly", G.T(G.cylX(19, 60, 150, { c: 3, seg: 28 }), { p: [0, 0, 0] }));
+  k.add("poly", G.extrudeZ([[96, -18, 2], [144, -18, 2], [144, -30, 3], [100, -28, 3]], 20, { bevel: 2 }));
+  k.add("steel", G.cylZ(3, -11, 11, { seg: 14 }), { p: [128, -26, 0] });
+  k.add("rubber", G.extrudeZ([[-8, 24, 3], [-22, 23, 4], [-22, -93, 4], [-8, -93, 3]], 38, { bevel: 3.5 }));
+  for (let i = 0; i < 10; i++) k.add("rubber", G.T(G.box(1.6, 2.6, 34), { p: [-22.2, 16 - i * 11.5, 0] }));
+  k.add("steel", G.wire([[20, -80, 0], [14, -99, 0], [-2, -99, 0], [-4, -84, 0]], 1.8, { n: 30 }));
+  return { root: k.build("ctr"), cheek: { x: 60, y: 23 } };
+}
+function stockSopmod(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit();
+  const pro = [[150, -17, 3], [150, 18, 4], [110, 28, 16], [-8, 30, 5], [-8, -90, 6], [110, -22, 26]];
+  k.add("poly", G.extrudeZ(pro, 34, { bevel: 4 }));
+  for (const s of [-1, 1]) {
+    k.add("poly", G.T(G.cylX(13, -6, 118, { c: 4, seg: 24 }), { p: [0, 12, s * 18] }));
+    k.add("poly", G.T(G.cylX(11.5, 118, 132, { c: 2, seg: 24 }), { p: [0, 12, s * 18] }));
+    k.add("steel", G.T(G.cylX(9, 130, 134, { c: 1, seg: 20 }), { p: [0, 12, s * 18] }));
+  }
+  k.add("poly", G.extrudeZ([[104, -20, 2], [146, -18, 2], [146, -27, 3], [110, -28, 3]], 18, { bevel: 2 }));
+  k.add("rubber", G.extrudeZ([[-8, 30, 3], [-24, 29, 4], [-24, -91, 5], [-8, -91, 3]], 60, { bevel: 4 }));
+  for (let i = 0; i < 10; i++) k.add("rubber", G.T(G.box(1.8, 2.6, 56), { p: [-24.2, 22 - i * 12, 0] }));
+  return { root: k.build("sopmod"), cheek: { x: 60, y: 30 } };
+}
+function stanagProfile(len, depth, curve, top = 48) {
+  const pts = [];
+  const off = (y) => y > -20 ? 0 : curve * Math.pow((-20 - y) / (len - 20), 1.6);
+  const n = 14;
+  for (let i = 0; i <= n; i++) {
+    const y = top - i / n * (top + len);
+    pts.push([-depth / 2 + off(y), y]);
+  }
+  for (let i = n; i >= 0; i--) {
+    const y = top - i / n * (top + len);
+    pts.push([depth / 2 + off(y), y]);
+  }
+  return { pts, off };
+}
+function magRounds(ctx, k, cal, top, x = -4) {
+  ctx.C.cartridge(k, cal, { p: [x - 26, top + 3.6, -2.6], r: [0, 0, -2] });
+  ctx.C.cartridge(k, cal, { p: [x - 26, top - 3.2, 2.6], r: [0, 0, -2] });
+}
+function stanag(ctx, o) {
+  const { G } = ctx;
+  const k = ctx.kit(), rk = ctx.kit();
+  const len = o.len, depth = 62, W = 23;
+  const { pts, off } = stanagProfile(len, depth, o.curve ?? 14);
+  k.add(o.mat, G.extrudeZ(pts.map((p) => [p[0], p[1], 0]), W, { bevel: o.bevel ?? 1.2 }));
+  if (o.ribs) {
+    const inner = stanagProfile(len - 18, depth - 18, (o.curve ?? 14) * 0.9, 30).pts;
+    for (const s of [-1, 1]) k.add(o.mat, G.extrudeZ(inner.map((p) => [p[0], p[1] - 8, 0]), 1, { bevel: 0.4, z: s * (W / 2 + 0.2) }));
+  }
+  if (o.texture) {
+    for (let i = 0; i < 6; i++) for (const s of [-1, 1]) k.add(o.mat, G.T(G.box(depth - 12, 1.6, 1, { bevel: 0.3 }), { p: [off(-28 - i * 6), -28 - i * 6, s * (W / 2 + 0.2)] }));
+  }
+  k.add(o.follower || "polyTan", G.box(depth - 8, 3, W - 5), { p: [-2, o.top ?? 44, 0] });
+  const fy = -len;
+  k.add(o.plate || o.mat, G.T(G.box(depth + 8, 7, W + 4, { bevel: 2 }), { p: [off(fy) + 3, fy - 2, 0], r: [0, 0, -Math.atan(off(fy) / len) * 20] }));
+  if (o.window) k.add("glassDark", G.box(8, 60, 1, { bevel: 0.3 }), { p: [depth / 2 - 10, -20, W / 2 + 0.1] });
+  magRounds(ctx, rk, o.cal || "556", 44);
+  const rounds = rk.build("rounds");
+  return { root: G.node("mag", [k.build(), rounds]), mag: { cap: o.cap, rounds } };
+}
+function surefire60(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit(), rk = ctx.kit();
+  const { pts, off } = stanagProfile(150, 62, 10);
+  k.add("alu", G.extrudeZ(pts.map((p) => [p[0], p[1] > -20 ? p[1] : p[1], 0]).map((p) => p), 23, { bevel: 1.2 }));
+  const low = stanagProfile(150, 64, 10).pts.filter((p) => p[1] < -24).map((p) => [p[0], p[1], 0]);
+  k.add("alu", G.extrudeZ(low, 38, { bevel: 3 }));
+  k.add("alu", G.T(G.box(68, 8, 40, { bevel: 2 }), { p: [off(-150) + 2, -152, 0] }));
+  magRounds(ctx, rk, "556", 44);
+  const rounds = rk.build("rounds");
+  return { root: G.node("mag", [k.build(), rounds]), mag: { cap: 60, rounds } };
+}
+function drum60(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit(), rk = ctx.kit();
+  const { pts } = stanagProfile(70, 62, 0);
+  k.add("poly", G.extrudeZ(pts.map((p) => [p[0], p[1], 0]), 23, { bevel: 1.2 }));
+  for (const s of [-1, 1]) {
+    k.add("poly", G.T(G.cylZ(58, 0, 34, { c: 4, seg: 40 }), { p: [8, -110, s > 0 ? 6 : -40] }));
+    k.add("polySoft", G.T(G.cylZ(20, 0, 3, { c: 1, seg: 28 }), { p: [8, -110, s > 0 ? 39 : -43] }));
+    k.add("glassDark", G.T(G.cylZ(9, 0, 1, { seg: 20 }), { p: [8, -110, s > 0 ? 42 : -44] }));
+  }
+  k.add("poly", G.T(G.box(20, 30, 12), { p: [8, -170, 0] }));
+  magRounds(ctx, rk, "556", 44);
+  const rounds = rk.build("rounds");
+  return { root: G.node("mag", [k.build(), rounds]), mag: { cap: 60, rounds } };
+}
+function charger(ctx, kind) {
+  const { G } = ctx;
+  const k = ctx.kit();
+  k.add("alu", G.extrudeX(G.rrect(0, 0, 11, 6, 1.5), -6, 40, { bevel: 0.6 }));
+  const wing = (z0, z1, ext) => G.extrudeY(G.shape([[-3, z0, 2], [-14 - ext, z0 + (z1 > z0 ? 0 : 0), 3], [-14 - ext, z1, 3], [-3, z1, 2]]), -4, 3, { bevel: 1 });
+  if (kind === "std") {
+    k.add("alu", G.extrudeY(G.shape([[0, -17, 2], [-13, -17, 4], [-13, 17, 4], [0, 17, 2]].map(([x, z, r]) => [x, z, r])), -4, 3, { bevel: 1 }));
+    k.add("alu", G.extrudeY(G.shape([[-4, -17], [-12, -17, 2], [-12, -24, 3], [-4, -22, 2]]), -4, 2.5, { bevel: 0.8 }));
+  } else if (kind === "raptor") {
+    k.add("alu", G.extrudeY(G.shape([[0, -14, 2], [-12, -14, 3], [-12, 14, 3], [0, 14, 2]]), -4, 3, { bevel: 1 }));
+    for (const s of [-1, 1]) k.add("poly", G.extrudeY(G.shape([[-2, s * 12], [-18, s * 13, 4], [-18, s * 32, 6], [-6, s * 30, 5]]), -5, 4, { bevel: 1.4 }));
+  } else {
+    k.add("alu", G.extrudeY(G.shape([[0, -17, 2], [-13, -17, 4], [-13, 17, 4], [0, 17, 2]]), -4, 3, { bevel: 1 }));
+    k.add("alu", G.extrudeY(G.shape([[-3, -16], [-16, -17, 3], [-17, -34, 6], [-6, -30, 5]]), -5, 3, { bevel: 1.2 }));
+  }
+  return { root: k.build("charger"), charger: { travel: 64 } };
+}
+var M416_PARTS = [
+  { id: "hk_quad", cat: "hg", name: "HK416 Quad Rail", desc: "Штатное цевьё с четырьмя планками Пикатинни", fit: { iface: ["hk416"] }, stats: { weight: 330, ergo: 0 }, build: quadRail },
+  { id: "hk_mlok", cat: "hg", name: 'Цевьё M-LOK 10,5"', desc: "Облегчённое, верхняя планка + секции M-LOK", fit: { iface: ["hk416"] }, stats: { weight: 210, ergo: 6, length: 10 }, build: mlokRail },
+  { id: "hk_fh", cat: "muzzle", name: "HK пламегаситель", desc: "Штатный щелевой пламегаситель", fit: { thread: ["1/2x28"] }, stats: { weight: 60, length: 44, flash: -45, loud: 0 }, build: hkFlashHider },
+  { id: "hk_diopter", cat: "rearsight", name: "HK диоптр (складной)", desc: "Барабан с четырьмя диоптрами 200–500 м", foot: [-15, 15], body: [-15, 15], stats: { weight: 80 }, build: hkDiopter },
+  { id: "hk_front", cat: "frontsight", name: "HK мушка (складная)", desc: "Мушка в кольцевом намушнике, тритий", foot: [-11, 11], body: [-11, 11], stats: { weight: 60 }, build: hkFront },
+  { id: "hk_slim", cat: "stock", name: "HK A5 Slimline", desc: "Штатный 6-позиционный приклад", mountTypes: ["stock"], fit: { iface: ["ar"] }, body: [-40, 150], stats: { weight: 260, ergo: 0, "recoilV%": 0 }, build: stockHkSlim },
+  { id: "ctr", cat: "stock", name: "Magpul CTR", desc: "Лёгкий, фрикционный фиксатор без люфта", mountTypes: ["stock"], fit: { iface: ["ar"] }, body: [-30, 150], stats: { weight: 230, ergo: 4, "recoilV%": 2 }, build: stockCTR },
+  { id: "sopmod", cat: "stock", name: "B5 SOPMOD", desc: "Широкая щека, отсеки под батареи", mountTypes: ["stock"], fit: { iface: ["ar"] }, body: [-30, 150], stats: { weight: 330, ergo: -2, "recoilV%": -6 }, build: stockSopmod },
+  { id: "hk_steel30", cat: "mag", name: "HK Steel 30", desc: "Стальной магазин HK на 30 патронов", fit: { iface: ["stanag"] }, stats: { weight: 470, mag: 30 }, build: (c) => stanag(c, { len: 128, mat: "steelPark", ribs: true, cap: 30, follower: "polyTan" }) },
+  { id: "pmag30", cat: "mag", name: "Magpul PMAG 30 Gen M3", desc: "Полимер, 30 патронов", fit: { iface: ["stanag"] }, stats: { weight: 420, mag: 30, ergo: 1 }, build: (c) => stanag(c, { len: 128, mat: "poly", texture: true, cap: 30, follower: "polyGrey", bevel: 1.6 }) },
+  { id: "pmag30w", cat: "mag", name: "PMAG 30 с окном", desc: "Окно контроля остатка", fit: { iface: ["stanag"] }, stats: { weight: 425, mag: 30 }, build: (c) => stanag(c, { len: 128, mat: "polyFde", texture: true, cap: 30, window: true, follower: "polyGrey", bevel: 1.6 }) },
+  { id: "pmag40", cat: "mag", name: "Magpul PMAG 40", desc: "Удлинённый, 40 патронов", fit: { iface: ["stanag"] }, stats: { weight: 560, mag: 40, ergo: -3, adsTime: 10 }, build: (c) => stanag(c, { len: 168, curve: 22, mat: "poly", texture: true, cap: 40, follower: "polyGrey", bevel: 1.6 }) },
+  { id: "sf60", cat: "mag", name: "SureFire MAG5-60", desc: "Четырёхрядный, 60 патронов", fit: { iface: ["stanag"] }, stats: { weight: 800, mag: 60, ergo: -6, adsTime: 20 }, build: surefire60 },
+  { id: "d60", cat: "mag", name: "Magpul D-60", desc: "Барабан на 60 патронов", fit: { iface: ["stanag"] }, stats: { weight: 1100, mag: 60, ergo: -9, adsTime: 30 }, build: drum60 },
+  { id: "ch_std", cat: "charger", name: "Штатная рукоять", desc: "Mil-spec, защёлка слева", fit: { iface: ["ar"] }, stats: { weight: 30 }, build: (c) => charger(c, "std") },
+  { id: "ch_bcm", cat: "charger", name: "BCM Gunfighter Mod 4", desc: "Увеличенная защёлка", fit: { iface: ["ar"] }, stats: { weight: 36, ergo: 2 }, build: (c) => charger(c, "bcm") },
+  { id: "ch_raptor", cat: "charger", name: "Radian Raptor", desc: "Двусторонняя, удобна с оптикой", fit: { iface: ["ar"] }, stats: { weight: 40, ergo: 3 }, build: (c) => charger(c, "raptor") }
+];
+
+// src/weapons/m416.js
+var RAIL_TOP2 = 30.5;
+function upperReceiver(ctx, k) {
+  const { G } = ctx;
+  const sec = [[14.5, -13, 1], [14.5, 6, 1], [11, 15, 2], [-11, 15, 2], [-14.5, 6, 1], [-14.5, -13, 1]];
+  const rB = 12.4, yT = 5, yB = -8;
+  const port = [[14.5, yT], [14.5, 6], [11, 15], [-11, 15], [-14.5, 6], [-14.5, -13], [14.5, -13], [14.5, yB]];
+  const a0 = Math.atan2(yB, Math.sqrt(rB * rB - yB * yB)), a1 = Math.atan2(yT, Math.sqrt(rB * rB - yT * yT)) - Math.PI * 2;
+  for (let i = 0; i <= 28; i++) {
+    const a = a0 + (a1 - a0) * (i / 28);
+    port.push([Math.cos(a) * rB, Math.sin(a) * rB]);
+  }
+  k.add("alu", G.extrudeX(sec, -142, -60, { bevel: 0.8 }));
+  k.add("alu", G.extrudeX(port, -60, 8, { bevel: 0.25 }));
+  k.add("alu", G.extrudeX(sec, 8, 38, { bevel: 0.8 }));
+  const r = G.picatinny(178, { base: RAIL_TOP2 - 14.5 });
+  k.add("alu", r.geo, { p: [-141, RAIL_TOP2, 0] });
+  k.add("alu", G.extrudeX([[-9, -13, 1], [9, -13, 1], [9, -4, 2], [-9, -4, 2]], -150, -140, { bevel: 0.6 }));
+  k.add("alu", G.extrudeY([[-74, 14.2], [-58, 14.2], [-58, 19.5, 2], [-67, 21, 3]], -3, 14, { bevel: 0.8 }));
+  k.add("alu", G.T(G.cylX(6.8, 0, 30, { c: 1.2, seg: 24 }), { r: [0, 28, 0], p: [-125, 6, 13] }));
+  k.add("steel", G.T(G.ringGrooves(5.4, -10, 0.5, 6, 0.4, { seg: 24 }), { r: [0, 28, 0], p: [-125, 6, 13] }));
+  k.add("steel", G.pin(2.2, 30), { p: [-122, -8, 0] });
+  return { railFirst: -141 + r.first, railSlots: r.slots };
+}
+function lowerReceiver(ctx, k, nodes) {
+  const { G } = ctx;
+  const body = [[-150, -13], [30, -13], [30, -24], [-40, -24], [-42, -40, 2], [-118, -40], [-124, -44, 2], [-150, -44, 3], [-156, -30, 6], [-156, -13]];
+  k.add("alu", G.extrudeZ(body, 24, { bevel: 1.6 }));
+  const well = G.shape(G.rrect(-6, 0, 74, 31, 3), [G.rrect(-6, 0, 67, 25, 2)]);
+  k.add("alu", G.extrudeY(well, -60, -14, { bevel: 0.8 }));
+  const flare = G.shape(G.rrect(-5, 0, 80, 35, 5), [G.rrect(-6, 0, 67, 25, 2)]);
+  k.add("alu", G.extrudeY(flare, -65, -58, { bevel: 1.4 }));
+  k.add("alu", G.extrudeZ([[26, -13], [44, -13], [44, -20, 4], [38, -26, 4], [26, -26]], 16, { bevel: 1 }));
+  const tg = G.shape(
+    [[-42, -38], [-44, -52, 4], [-54, -60, 6], [-110, -58, 8], [-122, -46, 4], [-122, -38]],
+    [[[-50, -40], [-50, -50, 3], [-58, -54, 4], [-106, -52, 6], [-114, -44, 3], [-114, -40]]]
+  );
+  k.add("alu", G.extrudeZ(tg, 13, { bevel: 1.5 }));
+  k.add("alu", G.extrudeZ([[-50, -16], [-38, -16], [-38, -34, 3], [-50, -34, 3]], 3, { bevel: 0.8, z: 13 }));
+  k.add("steel", G.cylZ(5.2, 12, 15.2, { c: 0.6, seg: 20 }), { p: [-44, -25, 0] });
+  k.add("steel", G.extrudeZ([[-58, -14, 1], [-44, -14, 1], [-44, -20, 2], [-52, -30, 2], [-58, -28, 1]], 3.2, { bevel: 0.6, z: -13.2 }));
+  for (const [x, y, r] of [[36, -18, 4], [-138, -18, 4], [-80, -30, 2.4], [-100, -30, 2.4]]) k.add("steel", G.pin(r, 25.5), { p: [x, y, 0] });
+  k.add("alu", G.T(G.cylX(17, -158, -142, { c: 1.5, seg: 32 }), { p: [0, 1, 0] }));
+  k.add("steel", G.T(G.cylX(19.5, -168, -159, { c: 1, seg: 12 }), { p: [0, 1, 0] }));
+  k.add("steel", G.T(G.latheX([[-172, 0], [-172, 17], [-168, 19], [-168, 0]], { seg: 32 }), { p: [0, 1, 0] }));
+  for (const s of [-1, 1]) {
+    k.add("steel", G.cylZ(6, 0, 7, { c: 0.8, seg: 20 }), { p: [-166, 1, s > 0 ? 17 : -24] });
+    k.add("lensBlack", G.cylZ(3.6, 0, 1, { seg: 16 }), { p: [-166, 1, s > 0 ? 23.6 : -24.6] });
+  }
+  k.add("alu", G.T(G.cylX(14.6, -338, -160, { c: 1.2, seg: 32 }), { p: [0, 1, 0] }));
+  k.add("alu", G.extrudeX(G.rrect(0, -14.5, 9, 6, 1.5), -330, -168, { bevel: 0.6 }), { p: [0, 1, 0] });
+  for (let i = 0; i < 6; i++) k.add("lensBlack", G.cylY(2, -1, 1, { seg: 12 }), { p: [-228 - i * 16, -16.5, 0] });
+  const tk = ctx.kit();
+  tk.add("steel", G.extrudeZ([[-3, 4], [3, 4], [3, -6, 2], [0, -16, 4], [-6, -22, 2], [-7.5, -20], [-3, -9, 3]], 6, { bevel: 1 }));
+  nodes.trigger = G.node("trigger", [tk.build()], { p: [-74, -34, 0] });
+  const sk = ctx.kit();
+  const lever = [[0, -4.5, 2], [20, -3, 3], [21, 3, 3], [0, 4.5, 2]];
+  sk.add("steel", G.extrudeZ(lever, 3, { bevel: 0.8, z: -13.8 }));
+  sk.add("steel", G.extrudeZ([[0, -3.5, 2], [11, -2.5, 2], [11, 2.5, 2], [0, 3.5, 2]], 2.6, { bevel: 0.6, z: 13.6 }));
+  sk.add("steel", G.cylZ(5.4, -15.2, 15, { c: 0.6, seg: 20 }));
+  nodes.selector = G.node("selector", [sk.build()], { p: [-106, -26, 0] });
+  return [nodes.trigger, nodes.selector];
+}
+function barrel(ctx, k) {
+  const { G } = ctx;
+  k.add("steel", G.latheX([[38, 0], [38, 12], [60, 12], [61, 10.4], [250, 10.4], [252, 9.6], [356, 9.6], [357, 6.4], [368, 6.3], [368, 2.8], [362, 2.8], [362, 0]], { seg: 32 }));
+  k.add("steel", G.extrudeX(G.rrect(0, 4, 26, 30, 6), 258, 286, { bevel: 1.2 }));
+  k.add("steel", G.T(G.cylX(7, 240, 262, { seg: 20 }), { p: [0, 16, 0] }));
+  k.add("steel", G.T(G.cylZ(3.2, -16, 16, { seg: 16 }), { p: [270, -6, 0] }));
+}
+function carrierGroup(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit();
+  k.add("steelPark", G.latheX([[-190, 0], [-190, 11.2], [-186, 12], [-60, 12], [-58, 11], [-44, 11], [-42, 12], [-6, 12], [-5, 10], [-5, 0]], { seg: 32 }));
+  k.add("steelPark", G.extrudeX(G.rrect(0, 12.5, 9, 6, 1.5), -150, -20, { bevel: 0.6 }));
+  k.add("steelWorn", G.latheX([[-6, 0], [-6, 8.2], [4, 8.2], [4.6, 7.4], [4.6, 0]], { seg: 20 }));
+  for (let i = 0; i < 7; i++) k.add("steelWorn", G.T(G.box(4, 3, 3.6, { bevel: 0.4 }), { p: [2.8, 9, 0], r: [i * 51.4, 0, 0] }));
+  k.add("steel", G.extrudeZ([[-18, 6], [2, 6], [2, 9.5], [-18, 9.5]], 3, { bevel: 0.5, z: 7.2 }));
+  return G.node("carrier", [k.build()]);
+}
+function dustCover(ctx) {
+  const { G } = ctx;
+  const k = ctx.kit();
+  k.add("steelPark", G.extrudeZ([[-60, 0, 1], [8, 0, 1], [8, 15, 1.5], [-60, 15, 1.5]], 1.4, { bevel: 0.4, z: 0.7 }));
+  k.add("steelPark", G.extrudeZ([[-40, 6], [-6, 6], [-6, 9.5], [-40, 9.5]], 1.2, { bevel: 0.4, z: 1.8 }));
+  k.add("steel", G.cylX(1.4, -61, 9, { seg: 10 }), { p: [0, 0, 0.9] });
+  const g = G.node("dustCover", [k.build()], { p: [0, -9.5, 14.6] });
+  return g;
+}
+function build(ctx) {
+  const { G, THREE: THREE7 } = ctx;
+  const k = ctx.kit();
+  const nodes = {};
+  const up = upperReceiver(ctx, k);
+  const lowerNodes = lowerReceiver(ctx, k, nodes);
+  barrel(ctx, k);
+  const body = k.build("receiver");
+  nodes.carrier = carrierGroup(ctx);
+  nodes.dustCover = dustCover(ctx);
+  const root = G.node("m416", [body, nodes.carrier, nodes.dustCover, ...lowerNodes]);
+  root.add(ctx.railMount("upperRail", [up.railFirst, RAIL_TOP2, 0], "top", up.railSlots, { axis: "top" }));
+  root.add(ctx.mount({ id: "hg", type: "hg", p: [38, 0, 0] }));
+  root.add(ctx.mount({ id: "muzzle", type: "thread", p: [368, 0, 0] }));
+  root.add(ctx.mount({ id: "magwell", type: "magwell", p: [-6, -62, 0] }));
+  root.add(ctx.mount({ id: "grip", type: "grip", p: [-121, -40, 0] }));
+  root.add(ctx.mount({ id: "stock", type: "stock", p: [-338, 1, 0], slots: 6, pitch: -16, axis: "stock" }));
+  root.add(ctx.mount({ id: "charger", type: "charger", p: [-142, 18, 0] }));
+  return {
+    root,
+    nodes,
+    anim: { carrierTravel: 92, portCover: nodes.dustCover, selector: { safe: 0, semi: 90, auto: 180 } },
+    eject: { p: [-26, 2, 16], dir: [0.25, 0.35, 1] },
+    muzzle: [368, 0, 0],
+    chamber: [0, 0, 0],
+    eyeX: -238,
+    cheekY: RAIL_TOP2 + 22,
+    focus: { center: [20, -20, 0], size: 920 }
+  };
+}
+var m416_default = {
+  id: "m416",
+  title: "HK416 A5",
+  short: "M416",
+  caliber: "5,56×45 NATO",
+  cal: "556",
+  thread: "1/2x28",
+  specs: [["Ствол", '368 мм (14,5")'], ["Автоматика", "газовый поршень"], ["Темп", "850 выстр/мин"], ["Масса", "3,49 кг"]],
+  base: { weight: 2420, length: 800, ergo: 52, recoilV: 100, recoilH: 100, moa: 1.4, velocity: 880, range: 450, loud: 160, flash: 70, adsTime: 280, rpm: 850, mag: 30 },
+  audio: { cal: "556", body: 0.55, crack: 1, mech: 0.8 },
+  modes: ["safe", "semi", "auto"],
+  build,
+  slots: [
+    { id: "handguard", label: "Цевьё", group: "Цевьё и ствол", accepts: ["hg"], mount: "hg", iface: "hk416" },
+    { id: "muzzle", label: "Дульное устройство", group: "Цевьё и ствол", accepts: ["muzzle"], mount: "muzzle" },
+    { id: "optic", label: "Прицел", group: "Оптика", accepts: ["optic"], rails: ["upperRail", "hgTop"], prefer: { x: -70 } },
+    { id: "rearsight", label: "Целик", group: "Оптика", accepts: ["rearsight"], rails: ["upperRail"], prefer: "rear" },
+    { id: "frontsight", label: "Мушка", group: "Оптика", accepts: ["frontsight"], rails: ["hgTop"], prefer: "front" },
+    { id: "magnifier", label: "Увеличитель", group: "Оптика", accepts: ["magnifier"], rails: ["upperRail", "hgTop"], prefer: { x: -120 } },
+    { id: "under", label: "Под стволом", group: "Тактика", accepts: ["foregrip", "bipod"], rails: ["hgBottom"], prefer: { x: 190 } },
+    { id: "tacRight", label: "Правая планка", group: "Тактика", accepts: ["light", "laser"], rails: ["hgRight"], prefer: "front" },
+    { id: "tacLeft", label: "Левая планка", group: "Тактика", accepts: ["light", "laser"], rails: ["hgLeft"], prefer: "front" },
+    { id: "tacTop", label: "Верх цевья", group: "Тактика", accepts: ["laser"], rails: ["hgTop"], prefer: "front" },
+    { id: "mag", label: "Магазин", group: "Ствольная коробка", accepts: ["mag"], mount: "magwell", iface: "stanag" },
+    { id: "pgrip", label: "Пистолетная рукоять", group: "Ствольная коробка", accepts: ["pgrip"], mount: "grip", iface: "ar" },
+    { id: "stock", label: "Приклад", group: "Ствольная коробка", accepts: ["stock"], mount: "stock", rails: ["stock"], iface: "ar", prefer: { x: -386 } },
+    { id: "charger", label: "Рукоять заряжания", group: "Ствольная коробка", accepts: ["charger"], mount: "charger", iface: "ar" }
+  ],
+  parts: M416_PARTS,
+  defaults: {
+    handguard: "hk_quad",
+    muzzle: "hk_fh",
+    optic: null,
+    rearsight: "hk_diopter",
+    frontsight: "hk_front",
+    magnifier: null,
+    under: null,
+    tacRight: null,
+    tacLeft: null,
+    tacTop: null,
+    mag: "hk_steel30",
+    pgrip: "hk_v2",
+    stock: "hk_slim",
+    charger: "ch_std"
+  }
+};
+
+// src/entries/m416.js
+boot(m416_default, LIB).catch((e) => {
+  console.error(e);
+  const b = document.getElementById("boot-t");
+  if (b) b.textContent = "Ошибка: " + e.message;
+});
+
+</script>
+</body>
+</html>

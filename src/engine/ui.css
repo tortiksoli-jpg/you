@@ -1,0 +1,7 @@
+html,body{margin:0;height:100%;overflow:hidden;background:#15171a;color:#eceae6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
+canvas{display:block}
+#boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#121417;z-index:100;transition:opacity .4s}
+#boot.off{opacity:0;pointer-events:none}
+.boot-in{display:flex;gap:12px;align-items:center;font-size:14px;color:#c9ccd0}
+.spin{width:18px;height:18px;border:2px solid rgba(255,255,255,.2);border-top-color:#e8b45c;border-radius:50%;animation:sp 0.8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}

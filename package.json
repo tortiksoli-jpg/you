@@ -1,0 +1,12 @@
+{
+  "name": "browser-gunsmith",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.23.0"
+  }
+}
