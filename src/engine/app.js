@@ -1,7 +1,7 @@
 // Приложение: связывает сцену, сборку оружия, эффекты, звук и интерфейс.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createScene, GUN_Y } from './scene.js';
+import { createScene, GUN_Y, LUX } from './scene.js';
 import { createMaterials } from './materials.js';
 import { makeCtx } from './ctx.js';
 import { Assembler, toRoot } from './mounts.js';
@@ -21,6 +21,42 @@ const KICK = { '556': 0.75, '545': 0.7, '762x39': 1.15, '762x51': 1.6 };
 
 // Все прицельные оси модуля: основная + дополнительные (info.sights).
 const sightsOf = (info) => (info ? [info.sight, ...(info.sights || [])].filter(Boolean) : []);
+
+/* ------------------------------------------------------------ питание */
+
+// Профиль луча по умолчанию (если модуль не задал свой): 1000 лм, 20 000 кд.
+const BEAM_DEF = { candela: 20000, hot: 0.075, spill: 0.55, spillK: 0.035, ring: 0.06, color: 0xf2f5ff, lensR: 0.014 };
+const POWER_DEF = { light: 22, laser: 30, driver: 'reg', cells: '2 × CR123A' };
+const fract = (x) => x - Math.floor(x);
+const hash1 = (i) => fract(Math.sin(i * 12.9898) * 43758.5453);
+// Просадка напряжения под нагрузкой в конце разряда: свет «спотыкается» и гаснет на доли секунды.
+function flicker(t, rate = 9) {
+  const a = Math.floor(t * rate), f = t * rate - a, s = f * f * (3 - 2 * f);
+  const v = hash1(a) * (1 - s) + hash1(a + 1) * s;
+  return v > 0.38 ? 0.8 + 0.2 * v : 0.06 + 0.1 * v;
+}
+// Световой поток по остатку заряда lv (0..1).
+// reg — стабилизированный драйвер (SureFire, Streamlight): полная яркость почти до конца,
+//       затем выход из стабилизации — свет тускнеет и желтеет, у самого конца моргает;
+// step — ступенчатое снижение (Modlite, Cloud Defensive): на 15 % яркость падает до ~40 %.
+export function lightOutput(lv, driver, t) {
+  if (lv <= 0) return { k: 0, warm: 0 };
+  let k, warm = 0;
+  if (driver === 'step') k = lv > 0.15 ? 1 : lv > 0.03 ? 0.42 : 0.42 * Math.sqrt(lv / 0.03);
+  else {
+    k = lv > 0.12 ? 1 - 0.04 * (1 - lv) : 0.95 * Math.pow(lv / 0.12, 0.9);
+    warm = lv < 0.12 ? (1 - lv / 0.12) * 0.4 : 0;
+  }
+  if (lv < 0.035) k *= flicker(t);
+  return { k, warm };
+}
+// Лазерный диод: мощность держится до ~10 %, затем падает; ниже порога генерации мерцает.
+export function laserOutput(lv, t) {
+  if (lv <= 0) return 0;
+  let k = lv > 0.1 ? 1 : 0.3 + 0.7 * (lv / 0.1);
+  if (lv < 0.03) k *= flicker(t * 1.6, 13);
+  return k;
+}
 
 class Tweens {
   constructor() { this.list = []; }
@@ -71,7 +107,12 @@ export async function boot(def, lib) {
     light: false, laser: false, folded: false, bipod: false, magAside: false, holdOpen: false,
     yaw: 0, pitch: 0, climb: 0, rec: { p: 0, y: 0, z: 0, vp: 0, vy: 0, vz: 0 },
     stats: {}, baseStats: {},
+    night: false, exposure: 1, expTarget: 1, battBusy: false,
   };
+  fx.floorAt = S.range.floorAt;
+  const qs0 = new URLSearchParams(location.search);
+  // ускорение разряда для проверки (?battx=60 — минута за секунду)
+  const battX = Math.max(1, +(qs0.get('battx') || 1));
 
   let cfg = {};
   let ui = null;
@@ -98,6 +139,8 @@ export async function boot(def, lib) {
     if (!magInfo) st.magIn = false; else if (opts.init) st.magIn = true;
     const mz = asm.info('muzzle')?.muzzle;
     audio.muzzle = mz ? mz.kind : 'bare';
+    const mzPart = asm.installed.get('muzzle')?.part;
+    audio.voice = mz?.kind === 'supp' ? { len: mzPart?.stats?.length || 170, loud: mzPart?.stats?.loud ?? -27, ...(mz.voice || {}) } : null;
     st.stats = asm.stats();
     // прицельные: стенсил линз и сетки «в бесконечности»
     for (const it of asm.installed.values()) {
@@ -129,8 +172,7 @@ export async function boot(def, lib) {
     lasers = asm.withInfo('laser');
     if (!lights.length) st.light = false;
     if (!lasers.length) st.laser = false;
-    for (const l of lights) l.data.lens.material.emissiveIntensity = st.light ? 6 : 0;
-    for (const l of lasers) l.data.lens.material.emissiveIntensity = st.laser ? 5 : 0;
+    lensGlow(0, 0);
     // магазин: видимость патронов
     const mi = asm.info('mag')?.mag;
     if (mi?.rounds) mi.rounds.visible = st.mag > 0;
@@ -275,12 +317,16 @@ export async function boot(def, lib) {
     const rc = new THREE.Raycaster(pos, dir, 0.05, 400);
     const hit = rc.intersectObjects(S.range.hitables, false)[0];
     if (hit) {
-      const surf = hit.object.userData.surface || 'dirt';
+      const surf = hit.object.userData.surface || 'concrete';
       setTimeout(() => fx.impact(hit, surf), (hit.distance / (st.stats.velocity || 850)) * 1000);
       if (surf === 'steel') {
         S.range.hit(hit.object.userData.target, 2.5 + (def.cal === '762x51' ? 2 : 0));
         audio.ding(hit.distance);
-      } else audio.thump(hit.distance);
+      } else if (surf === 'paper') {
+        // пробила мишень — дальше пуля уходит в пулеулавливатель
+        S.range.hit(hit.object.userData.target, 2.5);
+        audio.impact('trap', 101);
+      } else audio.impact(surf, hit.distance);
     }
     // гильза и затвор
     cycleAction();
@@ -340,10 +386,12 @@ export async function boot(def, lib) {
     const m = magNode();
     if (!m || !st.magIn) { done && done(); return; }
     const kind = magKind();
-    audio.magOut(kind);
+    // сколько патронов осталось в сбрасываемом магазине — от этого зависит звук
+    const fill = st.mag <= 0 ? 0 : st.mag < st.cap * 0.6 ? 1 : 2;
+    audio.magOut(kind, fill);
     const rock = magMount().rock;
     const fall = () => {
-      tw.add(m.position, 'y', -420, 0.42, (t) => t * t, () => { m.visible = false; m.position.y = 0; m.rotation.z = 0; audio.magDropGround(kind); });
+      tw.add(m.position, 'y', -420, 0.42, (t) => t * t, () => { m.visible = false; m.position.y = 0; m.rotation.z = 0; audio.magDropGround(kind, fill); });
       st.magIn = false;
       if (ui) ui.hud();
       setTimeout(() => done && done(), 380);
@@ -365,7 +413,10 @@ export async function boot(def, lib) {
     // касание шахты — примерно на 60% хода (кривая с замедлением)
     setTimeout(() => audio.magInsert(kind), 190);
     tw.add(m.position, 'y', 0, 0.35, (t) => 1 - Math.pow(1 - t, 3), () => {
-      const fin = () => { if (!rock) audio.magIn(kind); st.magIn = true; if (ui) ui.hud(); setTimeout(() => done && done(), 150); };
+      const fin = () => {
+        if (!rock) { audio.magIn(kind); setTimeout(() => audio.tug(kind), 170); }
+        st.magIn = true; if (ui) ui.hud(); setTimeout(() => done && done(), rock ? 150 : 260);
+      };
       // АК: зацеп спереди, поворот назад до щелчка защёлки (щелчок в звуке — через 50 мс)
       if (rock) { setTimeout(() => audio.magIn(kind), 90); tw.add(m.rotation, 'z', 0, 0.14, ease, fin); } else fin();
     });
@@ -425,14 +476,15 @@ export async function boot(def, lib) {
       if (!st.chambered) charge(() => { st.busy = false; ui?.hud(); });
       else { st.busy = false; ui?.hud(); }
     };
-    dropMag(() => setTimeout(() => insertMag(after), 250));
+    // пока старый магазин падает, рука уже идёт к подсумку за новым
+    dropMag(() => { audio.pouch(magKind()); setTimeout(() => insertMag(after), 480); });
   }
 
   function toggleMag() {
     if (st.busy || !asm.info('mag')) return;
     st.busy = true;
     if (st.magIn) dropMag(() => { st.busy = false; ui?.hud(); });
-    else insertMag(() => { st.busy = false; ui?.hud(); });
+    else { audio.pouch(magKind()); setTimeout(() => insertMag(() => { st.busy = false; ui?.hud(); }), 480); }
   }
 
   function setMode(m) {
@@ -458,7 +510,7 @@ export async function boot(def, lib) {
       const s = sights[st.sightIdx];
       if (s?.zoom) st.zoom = clamp(st.zoom, s.zoom[0], s.zoom[1]);
     }
-    audio.click();
+    audio.shoulder(on);
     ui?.hud();
   }
   function cycleSight() {
@@ -482,16 +534,117 @@ export async function boot(def, lib) {
   }
 
   // ----------------------------------------------------------- тактика
+  // Батареи хранятся по модулю в слоте: комбо-блок (фонарь + лазер) питается от одной.
+  const BATT_LS = 'gunsmith:batt';
+  let batt = {};
+  try { batt = JSON.parse(localStorage.getItem(BATT_LS) || '{}') || {}; } catch (e) { batt = {}; }
+  let battSaveT = 0;
+  const saveBatt = () => { try { localStorage.setItem(BATT_LS, JSON.stringify(batt)); } catch (e) { /* приватный режим */ } };
+  addEventListener('pagehide', saveBatt);
+  const devKey = (d) => d.slotId + ':' + d.part.id;
+  const powerOf = (d) => ({ ...POWER_DEF, ...(d.part.power || {}) });
+  function devices() {
+    const out = [];
+    for (const [slotId, it] of asm.installed) {
+      if (!it.info?.light && !it.info?.laser) continue;
+      const d = { slotId, part: it.part, obj: it.obj, light: it.info.light || null, laser: it.info.laser || null };
+      d.key = devKey(d); d.power = powerOf(d);
+      out.push(d);
+    }
+    return out;
+  }
+  const level = (d) => batt[d.key] ?? 1;
+  // Какие модули сейчас светят: первый фонарь/лазер с зарядом.
+  const activeLight = () => lights.find((l) => (batt[devKey(l)] ?? 1) > 0) || null;
+  const activeLaser = () => lasers.find((l) => (batt[devKey(l)] ?? 1) > 0) || null;
+  // Свечение линз по фактическому выходу (0..1).
+  function lensGlow(kl, kz) {
+    for (const l of lights) {
+      l.data.lens.material.emissiveIntensity = st.light ? 7 * kl : 0;
+      if (l.data.refl) l.data.refl.material.emissiveIntensity = st.light ? 0.9 * kl : 0;
+    }
+    for (const l of lasers) l.data.lens.material.emissiveIntensity = st.laser ? 5 * kz : 0;
+  }
+  function drain(dt) {
+    if (!st.light && !st.laser) return;
+    const k = dt * battX / 60;
+    for (const d of devices()) {
+      let rate = 0;
+      if (st.light && d.light && activeLight()?.slotId === d.slotId) rate += 1 / d.power.light;
+      if (st.laser && d.laser && activeLaser()?.slotId === d.slotId) rate += 1 / d.power.laser;
+      if (!rate) continue;
+      const before = level(d);
+      const lv = Math.max(0, before - rate * k);
+      batt[d.key] = lv;
+      if (before > 0 && lv <= 0) {
+        const what = d.light && d.laser ? 'Блок' : d.light ? 'Фонарь' : 'ЛЦУ';
+        ui?.toast(`${what} ${d.part.name}: батарея разряжена — G, замена батарей`);
+        if (!activeLight()) st.light = false;
+        if (!activeLaser()) st.laser = false;
+        ui?.hud();
+      } else if (before > 0.15 && lv <= 0.15) ui?.toast(`${d.part.name}: заряд батареи 15 %`);
+    }
+    battSaveT += dt;
+    if (battSaveT > 3) { battSaveT = 0; saveBatt(); }
+  }
   function toggleLight() {
     if (!lights.length) { ui?.toast('Фонарь не установлен'); return; }
-    st.light = !st.light; audio.click();
-    for (const l of lights) l.data.lens.material.emissiveIntensity = st.light ? 6 : 0;
+    if (st.battBusy) return;
+    if (!st.light && !activeLight()) { audio.click(); ui?.toast('Батарея фонаря разряжена — G, замена батарей'); return; }
+    st.light = !st.light; audio.tailcap(st.light);
     ui?.hud();
   }
   function toggleLaser() {
     if (!lasers.length) { ui?.toast('ЛЦУ не установлен'); return; }
+    if (st.battBusy) return;
+    if (!st.laser && !activeLaser()) { audio.click(); ui?.toast('Батарея ЛЦУ разряжена — G, замена батарей'); return; }
     st.laser = !st.laser; audio.click();
-    for (const l of lasers) l.data.lens.material.emissiveIntensity = st.laser ? 5 : 0;
+    ui?.hud();
+  }
+  // Замена батарей: открутить крышку, вытряхнуть элементы, вставить новые, закрутить.
+  // Модули на это время выключены, оружие занято.
+  function changeBatteries() {
+    const list = devices();
+    if (!list.length) { ui?.toast('Нет модулей с батареями'); return; }
+    if (st.busy) return;
+    st.busy = true; st.battBusy = true; st.trigger = false;
+    const wasL = st.light, wasZ = st.laser;
+    st.light = false; st.laser = false;
+    ui?.toast('Замена батарей…');
+    ui?.hud();
+    let i = 0;
+    const next = () => {
+      if (i >= list.length) {
+        st.busy = false; st.battBusy = false;
+        st.light = wasL && !!lights.length; st.laser = wasZ && !!lasers.length;
+        saveBatt();
+        ui?.toast(list.length > 1 ? 'Батареи заменены' : 'Батарея заменена');
+        ui?.hud();
+        return;
+      }
+      const d = list[i++];
+      const dur = audio.batteryChange(d.power.cells);
+      setTimeout(() => { batt[d.key] = 1; ui?.hud(); next(); }, dur * 1000);
+    };
+    next();
+  }
+  function batteryInfo() {
+    return devices().map((d) => {
+      const lv = level(d);
+      const on = (st.light && d.light && activeLight()?.slotId === d.slotId) || (st.laser && d.laser && activeLaser()?.slotId === d.slotId);
+      const rate = (d.light ? 1 / d.power.light : 0) * (st.light && d.light ? 1 : 0) + (d.laser ? 1 / d.power.laser : 0) * (st.laser && d.laser ? 1 : 0);
+      const full = d.light ? d.power.light : d.power.laser;
+      return { key: d.key, name: d.part.name, kind: d.light && d.laser ? 'combo' : d.light ? 'light' : 'laser', lv, on, min: lv / (rate || 1 / full), cells: d.power.cells };
+    });
+  }
+  // День / ночь: в тире выключается свет.
+  const NIGHT_LS = 'gunsmith:night';
+  function setNight(on, silent) {
+    st.night = !!on;
+    S.setNight(st.night);
+    if (!silent) { audio.lightSwitch(); ui?.toast(st.night ? 'Ночь: освещение тира выключено' : 'День: освещение тира включено'); }
+    try { localStorage.setItem(NIGHT_LS, st.night ? '1' : '0'); } catch (e) { /* пусто */ }
+    app?.invalidate?.();
     ui?.hud();
   }
   function toggleBipod() {
@@ -620,6 +773,7 @@ export async function boot(def, lib) {
     KeyR: reload, KeyX: cycleMode, KeyF: () => setADS(!st.ads), KeyV: cycleSight, KeyN: () => toggleMagnifier(),
     KeyC: toggleLight, KeyZ: toggleLaser, KeyB: toggleBipod, KeyK: toggleFold, KeyT: () => { if (!st.busy) { st.busy = true; charge(() => { st.busy = false; ui?.hud(); }); } },
     KeyM: toggleMag, Escape: () => setADS(false), KeyH: () => ui?.toggleHelp(),
+    KeyL: () => setNight(!st.night), KeyG: changeBatteries,
   };
   addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT') return;
@@ -787,20 +941,49 @@ export async function boot(def, lib) {
       controls.update();
     }
 
-    // фонарь и ЛЦУ
+    // фонарь и ЛЦУ: выход по заряду батареи
     gun.updateMatrixWorld(true);
-    if (lights.length && st.light) {
-      const L = lights[0];
-      const p = L.obj.localToWorld(new THREE.Vector3(...L.data.p));
-      const dv = new THREE.Vector3(1, 0, 0).transformDirection(L.obj.matrixWorld);
-      fx.setLight(true, p, dv, L.data.lumens);
-    } else fx.setLight(false);
-    if (lasers.length && st.laser) {
-      const L = lasers[0];
-      const p = L.obj.localToWorld(new THREE.Vector3(...L.data.p));
-      const dv = new THREE.Vector3(1, 0, 0).transformDirection(L.obj.matrixWorld);
-      fx.setLaser(true, p, dv, S.range.hitables);
-    } else fx.setLaser(false);
+    drain(dt);
+    const t = performance.now() / 1000;
+    const Ld = st.light ? activeLight() : null, Zd = st.laser ? activeLaser() : null;
+    const lo = Ld ? lightOutput(batt[devKey(Ld)] ?? 1, powerOf(Ld).driver, t) : { k: 0, warm: 0 };
+    const zk = Zd ? laserOutput(batt[devKey(Zd)] ?? 1, t) : 0;
+    lensGlow(lo.k, zk);
+    let beamE = 0;
+    if (Ld) {
+      const p = Ld.obj.localToWorld(new THREE.Vector3(...Ld.data.p));
+      const dv = new THREE.Vector3(1, 0, 0).transformDirection(Ld.obj.matrixWorld);
+      const b = { ...BEAM_DEF, ...(Ld.data.beam || {}) };
+      if (!Ld.data.beam && Ld.data.lumens) b.candela = Ld.data.lumens * 20;
+      b.cd = b.candela * LUX;
+      ray.set(p, dv); ray.far = 150;
+      const h = ray.intersectObjects(S.range.hitables, false)[0];
+      const dist = h ? h.distance : 150;
+      fx.setLight({ pos: p, dir: dv, beam: b, k: lo.k, warm: lo.warm, dist, hit: h?.point, hitColor: h?.object.material?.color, cam: S.camera, exposure: st.exposure });
+      // Освещённость в поле зрения от луча: доля кадра, занятая пятном, + засветка.
+      // Глаз частично подстраивается и под самое яркое место (пятно на мишени).
+      const half = Math.tan(S.camera.fov * D2R / 2);
+      const cover = Math.min(1, (Math.tan(b.hot * 1.6) / half) ** 2);
+      const E = b.cd * lo.k / Math.max(0.35, dist) ** 2;
+      beamE = E * 0.5 * (cover + b.spillK) + E * 0.6 * 0.35;
+    } else fx.setLight(null);
+    if (Zd) {
+      const p = Zd.obj.localToWorld(new THREE.Vector3(...Zd.data.p));
+      const dv = new THREE.Vector3(1, 0, 0).transformDirection(Zd.obj.matrixWorld);
+      fx.setLaser({ pos: p, dir: dv, hitables: S.range.hitables, color: Zd.data.color, k: zk, night: st.night });
+    } else fx.setLaser(null);
+    // Адаптация «глаза»: к темноте — медленно (секунды), к яркому — быстро.
+    // Частичная: ночью темно остаётся темно, а стена в метре от фонаря слепит.
+    const amb = S.ambient();
+    const Lsc = amb * 0.5 + beamE;
+    st.expTarget = clamp(Math.pow(1.2 / Math.max(1e-5, Lsc), 0.62), 0.32, 11);
+    const nvOn = document.body.classList.contains('nv');
+    const tgt = st.expTarget * (nvOn ? 18 : 1);
+    const tau = tgt > st.exposure ? 2.2 : 0.22;
+    st.exposure += (tgt - st.exposure) * (1 - Math.exp(-dt / tau));
+    if (Math.abs(tgt - st.exposure) < 1e-3) st.exposure = tgt;
+    S.renderer.toneMappingExposure = st.exposure;
+    fx.setAmbient(amb / 2.2);
 
     fx.update(dt, (s, n) => audio.casing(0, s.steel, n > 1 ? 0.35 : 0.8), S.camera, fx.heat > 0.3 ? muzzleWorld(mzTmp) : null);
     S.range.update(dt);
@@ -812,7 +995,10 @@ export async function boot(def, lib) {
     get cfg() { return cfg; }, get sights() { return sights; },
     setPart, railMove, railInfo, resetCfg, focusSlot, unfocus,
     triggerDown, triggerUp, reload, cycleMode, setADS, cycleSight, toggleMagnifier,
-    toggleLight, toggleLaser, toggleBipod, toggleFold, toggleMag,
+    toggleLight, toggleLaser, toggleBipod, toggleFold, toggleMag, changeBatteries, batteryInfo,
+    toggleNight: () => setNight(!st.night), setNight,
+    // отладка: мгновенная адаптация глаза (скриншоты на медленном рендере)
+    settle: () => { st.exposure = st.expTarget * (document.body.classList.contains('nv') ? 18 : 1); S.renderer.toneMappingExposure = st.exposure; },
     charge: () => keys.KeyT(),
     toggleSound: () => { audio.init(); audio.setMuted(!audio.muted); ui?.hud(); },
     defaultStats: null,
@@ -826,6 +1012,15 @@ export async function boot(def, lib) {
   applyConfig(def.defaults, { init: true });
   app.defaultStats = { ...st.stats };
   applyConfig(start, { init: true });
+  {
+    let n = null;
+    try { n = localStorage.getItem(NIGHT_LS); } catch (e) { /* пусто */ }
+    if (qs.get('night') != null) n = qs.get('night');
+    if (n === '1') setNight(true, true);
+    if (qs.get('light') === '1' && lights.length) st.light = true;
+    if (qs.get('laser') === '1' && lasers.length) st.laser = true;
+    if (qs.get('batt') != null) for (const d of devices()) batt[d.key] = +qs.get('batt');
+  }
   const sel = base.nodes?.selector, a0 = base.anim?.selector?.[st.mode];
   if (sel && a0 != null) sel.rotation.z = a0 * D2R;
   ui = new UI(app);
@@ -866,10 +1061,11 @@ export async function boot(def, lib) {
   let activeDpr = maxDpr, curDpr = maxDpr, fts = [], ftT = 0, slowStreak = 0;
   const bootT = performance.now();
   const gunPrev = new THREE.Matrix4();
-  const setDpr = (v) => { if (Math.abs(v - curDpr) < 0.01) return; curDpr = v; R.setPixelRatio(v); R.setSize(innerWidth, innerHeight); };
+  const setDpr = (v) => { if (Math.abs(v - curDpr) < 0.01) return; curDpr = v; R.setPixelRatio(v); R.setSize(innerWidth, innerHeight); S.resize(); };
   function simBusy() {
     const r = st.rec;
     if (st.ads || st.adsT > 0 || st.trigger || st.busy || st.light || st.laser || tw.list.length || fx.active()) return true;
+    if (Math.abs(st.exposure - st.expTarget * (document.body.classList.contains('nv') ? 18 : 1)) > 2e-3) return true;
     if (Math.abs(r.p) + Math.abs(r.y) + Math.abs(r.z) + Math.abs(r.vp) + Math.abs(r.vy) + Math.abs(r.vz) > 1e-3 || st.climb > 1e-4) return true;
     for (const t of S.range.targets) if (Math.abs(t.userData.vel) + Math.abs(t.userData.swing) > 1e-4) return true;
     return false;
@@ -912,7 +1108,7 @@ export async function boot(def, lib) {
     if (busy || sceneDirty || !gunPrev.equals(gun.matrixWorld)) R.shadowMap.needsUpdate = true;
     gunPrev.copy(gun.matrixWorld);
     camDirty = false; sceneDirty = false;
-    R.render(S.scene, S.camera);
+    S.render();
   };
   loop();
   return app;

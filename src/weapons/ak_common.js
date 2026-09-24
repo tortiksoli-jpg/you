@@ -18,33 +18,61 @@ export const AK = {
 function receiver(ctx, k, o) {
   const M = o.steel;
   const { FRONT: F, REAR: R, WALL: W, BOTTOM: B } = AK;
-  // правая боковина: окно выброса и паз рукояти затворной рамы
-  const right = [[F, B, 1], [F, W], [-12, W], [-12, -1, 1], [-88, -1, 1], [-88, 7], [-206, 7], [-206, W], [R, W], [R, -15, 2], [R + 9, B, 3]];
-  const left = [[F, B, 1], [F, W], [R, W], [R, -15, 2], [R + 9, B, 3]];
-  k.add(M, G.extrudeZ(right, 1.4, { bevel: 0.35, z: 14.3 }));
-  k.add(M, G.extrudeZ(left, 1.4, { bevel: 0.35, z: -14.3 }));
-  // дно с окном магазина
-  const floor = G.shape(G.rrect((F + R) / 2, 0, F - R, 30, 1), [G.rrect(-37, 0, 72, 26, 2)]);
-  k.add(M, G.extrudeY(floor, B - 1.4, B, { bevel: 0.3 }));
+  const YB = B + 2, BR = 3.4;          // низ боковин и радиус гибки листа у дна
+  const MW0 = -73, MW1 = -1;           // окно магазина
+  // выштамповка-направляющая магазина (овальная лунка): сквозь боковину + утопленное дно
+  const dimple = G.slot(-54, -20, -11, 11, 8);
+  const holes = o.dimples ? [dimple] : [];
+  // правая боковина: окно выброса и паз рукояти затворной рамы; у окна магазина — до дна
+  const low = [[R + 9, YB, 3], [MW0, YB, 1], [MW0, B - 1.4, 1], [MW1, B - 1.4, 1], [MW1, YB, 1]];
+  const right = [[F, YB, 1], [F, W], [-12, W], [-12, -1, 1], [-88, -1, 1], [-88, 7], [-206, 7], [-206, W], [R, W], [R, -15, 2], ...low];
+  const left = [[F, YB, 1], [F, W], [R, W], [R, -15, 2], ...low];
+  k.add(M, G.extrudeZ(G.shape(right, holes), 1.4, { bevel: 0.35, z: 14.3 }));
+  k.add(M, G.extrudeZ(G.shape(left, holes), 1.4, { bevel: 0.35, z: -14.3 }));
+  if (o.dimples) for (const s of [-1, 1]) k.add(M, G.extrudeZ(G.shape(dimple), 1.2, { bevel: 0.45, z: s * 13.9 }));
+  // дно: две части вокруг окна магазина, по краям — гибка радиусом BR
+  const cz = 15 - BR;
+  for (const [x0, x1] of [[R + 6, MW0], [MW1, F]]) {
+    // в задней части — прорезь под спусковой крючок
+    const slot = x0 < -100 ? [G.rrect(-114, 0, 18, 7, 2)] : [];
+    k.add(M, G.extrudeY(G.shape(G.rrect((x0 + x1) / 2, 0, x1 - x0, cz * 2, 0.6), slot), B - 1.4, B, { bevel: 0.3 }));
+    for (const s of [-1, 1]) {
+      const bend = [];
+      for (let i = 0; i <= 8; i++) { const a = -(i / 8) * Math.PI / 2; bend.push([s * (cz + Math.cos(a) * BR), YB + Math.sin(a) * BR]); }
+      for (let i = 8; i >= 0; i--) { const a = -(i / 8) * Math.PI / 2; bend.push([s * (cz + Math.cos(a) * (BR - 1.4)), YB + Math.sin(a) * (BR - 1.4)]); }
+      k.add(M, G.extrudeX(bend, Math.max(x0, R + 9), x1, { bevel: 0.3 }));
+    }
+  }
   // вкладыши: передний и задний, внутренние поверхности (затемнены)
   k.add('steel', G.extrudeX(G.rrect(0, (B + W) / 2 - 2, 26.6, W - B - 4, 1), 8, F, { bevel: 0.6 }));
   k.add('steel', G.extrudeX(G.rrect(0, (B + W) / 2 - 2, 26.6, W - B - 6, 1), R, R + 14, { bevel: 0.6 }));
   k.add('lensBlack', G.extrudeX(G.rrect(0, -8, 26, 8, 0), -205, 6, { bevel: 0 }));
   // верхние отбортовки-направляющие
   for (const s of [-1, 1]) k.add(M, G.extrudeX(G.rrect(s * 13.6, W - 0.6, 3, 1.4, 0.4), R, F, { bevel: 0.2 }));
-  // заклёпки передней и задней вставок, оси УСМ, ось переводчика
-  const rivets = [[4, -5], [14, -15], [2, -17], [16, -4], [-214, -3], [-214, -14], [-201, -9], [-58, -19], [-150, -18]];
-  for (const s of [-1, 1]) for (const [x, y] of rivets) k.add(M, G.T(G.latheX([[0, 0], [0, 2.3], [0.7, 1.9], [1.1, 0]], { seg: 12 }), { r: [0, s > 0 ? -90 : 90, 0], p: [x, y, s * 15] }));
-  for (const s of [-1, 1]) for (const [x, y] of [[-118, -7], [-143, -7]]) {
-    k.add('steelWorn', G.T(G.cylZ(2.6, 0, 1.2, { seg: 14 }), { p: [x, y, s > 0 ? 15 : -16.2] }));
+  // заклёпки: передний вкладыш (4), центральная опора (2), спусковая скоба, задний вкладыш (3)
+  const head = () => G.latheX([[0, 0], [0, 2.4], [0.35, 2.3], [0.7, 2.0], [1.0, 1.4], [1.15, 0.7], [1.2, 0]], { seg: 16, crease: 70 });
+  const rivets = [[4, -5], [16, -4], [3, -17], [15, -16], [-81, -13], [-90, -13], [-77, -19.5], [-150, -18], [-214, -3], [-214, -14], [-201, -9]];
+  for (const s of [-1, 1]) for (const [x, y] of rivets) k.add(M, G.T(head(), { r: [0, s > 0 ? -90 : 90, 0], p: [x, y, s * 15] }));
+  // ствольный штифт среди заклёпок переднего вкладыша (слева)
+  k.add('steelWorn', G.T(G.cylZ(2.5, -15.35, -14.6, { c: 0.25, seg: 16 }), { p: [9.5, -10.5, 0] }));
+  // оси курка и спускового крючка: головки с проточкой под «посох»
+  for (const s of [-1, 1]) for (const [x, y] of [[-92, -17], [-112, -18]]) {
+    k.add('steelWorn', G.T(G.latheX([[0, 0], [0, 2.7], [0.3, 2.8], [0.9, 2.8], [1.2, 2.4], [1.2, 0]], { seg: 16 }), { r: [0, s > 0 ? -90 : 90, 0], p: [x, y, s * 15] }));
   }
-  // «пастуший посох» — пружина-фиксатор осей УСМ (слева)
-  k.add('spring', G.wire([[-118, -7, -16.3], [-128, -9, -16.4], [-143, -7, -16.3], [-160, -10, -16.2], [-170, -6, -16.2], [-168, -1, -16.2]], 0.8, { n: 60, seg: 6 }));
-  // выштамповки над магазином (АКМ) — углубления видны по ободку
-  if (o.dimples) for (const s of [-1, 1]) k.add(M, G.T(G.tubeX(6.5, 4.8, 0, 0.5, { seg: 24, c: 0.15 }), { r: [0, s > 0 ? -90 : 90, 0], p: [-37, -11, s * 15] }));
-  // боковая планка «ласточкин хвост» (слева)
+  // ось переводчика слева: шайба с разрезным кольцом
+  k.add('steelWorn', G.T(G.latheX([[0, 0], [0, 4.2], [0.4, 4.4], [1.1, 4.4], [1.5, 3.6], [1.5, 1.4], [2.2, 1.2], [2.2, 0]], { seg: 20 }), { r: [0, 90, 0], p: [-178, 2, -15] }));
+  // «пастуший посох» — пружина-фиксатор осей УСМ (слева), длинное плечо — в проточку оси переводчика
+  k.add('spring', G.wire([[-92, -17, -16.3], [-101, -20, -16.5], [-112, -18, -16.3], [-132, -17, -16.2], [-158, -11, -16.2], [-174, -2, -16.2], [-178, 3.6, -16.4]], 0.8, { n: 70, seg: 6 }));
+  // лунки фиксатора переводчика справа — перед концом рычага в каждом положении
+  for (const a of [0, -6.5, -13]) {
+    const r = a * Math.PI / 180, lx = 123, ly = 0;
+    const x = -178 + lx * Math.cos(r) - ly * Math.sin(r), y = 2 + lx * Math.sin(r) + ly * Math.cos(r);
+    k.add(M, G.T(G.tubeX(1.7, 0.9, 0, 0.35, { seg: 14, c: 0.12 }), { r: [0, -90, 0], p: [x, y, 15] }));
+  }
+  // боковая планка «ласточкин хвост» (слева) на трёх заклёпках
   k.add(M, G.T(G.extrudeX(G.shape([[-5, 0], [5, 0], [7, 3.2], [-7, 3.2]]), -150, -38, { bevel: 0.4 }), { r: [-90, 0, 0], p: [0, -2, -15.5] }));
-  for (const x of [-140, -48]) k.add(M, G.T(G.cylZ(2.2, -19.4, -18.3, { seg: 12 }), { p: [x, -2, 0] }));
+  k.add(M, G.T(G.extrudeX(G.shape([[-7.4, 0], [7.4, 0], [7.4, 0.8], [-7.4, 0.8]]), -152, -36, { bevel: 0.3 }), { r: [-90, 0, 0], p: [0, -2, -15] }));
+  for (const x of [-140, -94, -48]) k.add(M, G.T(G.latheX([[0, 0], [0, 2.3], [0.4, 2.1], [0.8, 1.2], [0.9, 0]], { seg: 14 }), { r: [0, 90, 0], p: [x, -2, -18.7] }));
 }
 
 // Крышка ствольной коробки: штатная (рёбра) — отдельный модуль, чтобы менялась.
@@ -63,15 +91,19 @@ export function coverStd(ctx, o = {}) {
   const inner = arc(15.2, 11.4, 26.3, 11).reverse();
   const sec = [...outer, ...inner.map((p) => [p[0], p[1]])];
   k.add(M, G.extrudeX(sec, AK.REAR + 1, AK.FRONT + 4, { bevel: 0.3 }));
-  // поперечные рёбра жёсткости
+  // поперечные рёбра жёсткости: выдавки со скруглённым профилем
   const ribs = o.ribs || [-196, -170, -144, -118, -92, -66, -40];
-  const rib = arc(16.9, 14, 28, 12.5);
-  const ribIn = arc(16.3, 14, 27.4, 11.9).reverse();
-  for (const x of ribs) k.add(M, G.extrudeX([...rib, ...ribIn], x - 3, x + 3, { bevel: 0.6 }));
+  const bump = [[-4, 0], [-2.6, 0.3], [-1, 0.6], [1, 0.6], [2.6, 0.3], [4, 0]];
+  for (const x of ribs) k.add(M, G.loftX(bump.map(([dx, d]) => ({ x: x + dx, pts: arc(16.4 + d, 13.2, 27.5 + d, 12 + d, 18) })), { crease: 70, flip: true }));
+  // отгибы нижних кромок внутрь
+  for (const s of [-1, 1]) k.add(M, G.extrudeX(G.rrect(s * 15.2, 12, 2.4, 1.2, 0.4), AK.REAR + 2, AK.FRONT + 3, { bevel: 0.3 }));
   // задний торец и кнопка направляющей возвратной пружины
   k.add(M, G.extrudeX(arc(16.4, 11.4, 27.5, 12), AK.REAR - 1, AK.REAR + 2, { bevel: 0.5 }));
   k.add('steelWorn', G.T(G.cylX(4.6, AK.REAR - 6, AK.REAR - 0.5, { c: 0.8, seg: 18 }), { p: [0, 17, 0] }));
   k.add('steelWorn', G.T(G.box(3, 3, 12), { p: [AK.REAR - 4, 13.5, 0] }));
+  // окно в крышке под выступ направляющей и сам выступ
+  k.add('lensBlack', G.extrudeY(G.rrect(AK.REAR + 12, 0, 11, 7, 1.5), 26.9, 27.62, { bevel: 0.1 }));
+  k.add('steelWorn', G.extrudeY(G.rrect(AK.REAR + 12.5, 0, 8.4, 5, 1), 24, 28.3, { bevel: 0.5 }));
   return { root: k.build('cover') };
 }
 
@@ -95,62 +127,106 @@ function carrier(ctx, o) {
 
 function barrelAndGas(ctx, k, o) {
   const M = o.steel;
-  const { MUZZLE } = AK;
-  k.add(M, G.latheX([[AK.FRONT - 6, 0], [AK.FRONT - 6, 12.5], [96, 12.5], [98, 11], [220, 10.2], [296, 9.4], [300, 9], [368, 8.4], [404, 8.2], [405, 7], [MUZZLE, 7], [MUZZLE, 3], [MUZZLE - 6, 3], [MUZZLE - 6, 0]], { seg: 32 }));
-  // колодка прицела
-  k.add(M, G.extrudeZ([[AK.FRONT - 2, 6], [94, 6], [94, 27, 2], [86, 34, 3], [34, 37, 3], [AK.FRONT - 2, 33, 2]], 26, { bevel: 1.4 }));
+  const { MUZZLE, FRONT_X: FX, SIGHT_Y: SY } = AK;
+  // ствол: уступы у колодки, газовой камеры и основания мушки
+  k.add(M, G.latheX([[AK.FRONT - 6, 0], [AK.FRONT - 6, 12.5], [96, 12.5], [97, 12], [98, 11], [220, 10.2], [286, 9.6], [287, 9.4], [296, 9.4], [300, 9], [330, 8.8], [331.5, 8.5], [362, 8.4], [404, 8.2], [405, 7.2], [405.5, 6.6], [405.5, 0]], { seg: 32 }));
+  // посадочная шейка дульного устройства (резьба закрыта ДТК) и канал с фаской
+  k.add(M, G.latheX([[405.5, 3], [405.5, 7], [MUZZLE - 0.8, 7], [MUZZLE, 6.2], [MUZZLE, 3.6], [MUZZLE - 0.6, 3], [405.5, 3]], { seg: 28 }));
+  // колодка прицела: основание, кольцо на стволе, боковые щёчки-секторы со ступенями
+  k.add(M, G.extrudeZ([[AK.FRONT - 2, 6], [94, 6], [94, 27, 2], [89, 31, 2], [36, 32.4, 2], [AK.FRONT - 2, 31, 2]], 26, { bevel: 1.4 }));
   k.add(M, G.extrudeX(G.shape(G.circle(0, 0, 15, 24).map((p) => [p[0], p[1], 0])), AK.FRONT - 2, 94, { bevel: 1 }));
+  const cam = [[34, 30], [92, 30]];
+  for (let i = 6; i >= 0; i--) { const y = 35.4 - i * 0.38; cam.push([44 + 8 * i, y], [36 + 8 * i, y]); }
+  for (const s of [-1, 1]) k.add(M, G.extrudeZ(cam, 4.2, { bevel: 0.4, z: s * 10.9 }));
+  k.add('steelWorn', G.T(G.cylZ(1.8, -13.3, 13.3, { c: 0.3, seg: 12 }), { p: [89, 33.2, 0] }));
+  for (const x of [44, 80]) k.add('steelWorn', G.T(G.cylZ(1.7, -14.1, 14.1, { c: 0.3, seg: 12 }), { p: [x, -6.5, 0] }));
   // планка прицела с хомутиком и прорезью
   const leaf = ctx.kit();
-  const SY = AK.SIGHT_Y;
   leaf.add(M, G.extrudeZ([[AK.REAR_X, 36.4], [88, 33.6], [88, 36.2], [36, 39.4, 2], [AK.REAR_X, 39.8]], 17, { bevel: 0.5 }));
   // щиток с U-образной прорезью: плечики прорези — линия прицеливания (вершина мушки вровень с ними)
   const notch = [[-8.5, 35.2, 1], [8.5, 35.2, 1], [8.5, SY, 0.8], [1.5, SY, 0.2], [1.2, SY - 2.4, 0.5], [-1.2, SY - 2.4, 0.5], [-1.5, SY, 0.2], [-8.5, SY, 0.8]];
   leaf.add(M, G.extrudeX(notch, AK.REAR_X, AK.REAR_X + 3.4, { bevel: 0.3 }));
+  // хомутик с защёлками по бокам и рифлёными гранями
   leaf.add('steelWorn', G.extrudeZ([[58, 35.6], [70, 34.9], [70, 41.5, 1], [58, 42.2, 1]], 20, { bevel: 0.8 }));
-  leaf.add('steelWorn', G.T(G.cylZ(2.6, 10, 13, { seg: 14 }), { p: [64, 38.6, 0] }));
+  for (let i = 0; i < 4; i++) leaf.add('steelWorn', G.T(G.box(0.8, 5, 20.6, { bevel: 0.25 }), { p: [59.6 + i * 3, 38.8 - i * 0.18, 0] }));
+  for (const s of [-1, 1]) {
+    leaf.add('steelWorn', G.T(G.latheX([[0, 0], [0, 2.4], [0.8, 2.4], [1.6, 1.8], [1.8, 0]], { seg: 14 }), { r: [0, s > 0 ? -90 : 90, 0], p: [64, 38.4, s * 10] }));
+  }
   for (let i = 0; i < 6; i++) leaf.add('paintWhite', G.T(G.box(0.6, 0.2, 3), { p: [40 + i * 7.5, 39.1 - i * 0.4, 5] }));
   const leafNode = leaf.build('rearLeaf');
   // флажок-замыкатель газовой трубки справа на колодке
   k.add(M, G.extrudeZ([[82, 16, 1], [90, 16, 1], [100, 30, 2], [95, 33, 2]], 3, { bevel: 0.6, z: 14.4 }));
-  k.add(M, G.T(G.cylZ(3.2, 13, 16.5, { seg: 16 }), { p: [86, 18, 0] }));
-  // газовая трубка
+  k.add(M, G.T(G.latheX([[0, 0], [0, 3.4], [2.4, 3.4], [3.4, 2.6], [3.6, 0]], { seg: 16 }), { r: [0, -90, 0], p: [86, 18, 13] }));
+  // газовая трубка: задний фланец в колодке, газоотводные отверстия спереди
   k.add(M, G.T(G.cylX(AK.GAS_R, 92, 300, { c: 0.8, seg: 24 }), { p: [0, AK.GAS_Y, 0] }));
+  k.add(M, G.T(G.cylX(AK.GAS_R + 0.8, 92, 100, { c: 0.6, seg: 24 }), { p: [0, AK.GAS_Y, 0] }));
+  for (const x of [262, 271, 280]) for (const s of [-1, 1]) {
+    k.add('lensBlack', G.T(G.cylZ(1.6, 0, 0.6, { seg: 12, c: 0.1 }), { p: [x, AK.GAS_Y, s > 0 ? AK.GAS_R - 0.35 : -AK.GAS_R - 0.25] }));
+  }
   // газовая камера: АКМ — отвод 90°, АК-74 — 45°
   const gb = o.gas45
     ? [[292, -9, 2], [322, -9, 2], [326, 2, 2], [313, 32, 4], [292, 32, 3]]
     : [[292, -9, 2], [328, -9, 2], [328, 10, 2], [324, 33, 4], [296, 33, 3], [292, 26]];
   k.add(M, G.extrudeZ(gb, 22, { bevel: 1.6 }));
   k.add(M, G.T(G.cylX(11.5, 290, 300, { c: 1, seg: 24 }), { p: [0, AK.GAS_Y, 0] }));
+  k.add('steelWorn', G.T(G.cylZ(1.9, -11.2, 11.2, { c: 0.3, seg: 12 }), { p: [310, -3, 0] }));
+  // упор шомпола под газовой камерой
+  k.add(M, G.extrudeX(G.shape(G.rrect(0, -14, 10, 12, 2.4), [G.circle(0, -15, 3.3, 16)]), 298, 316, { bevel: 0.9 }));
   // антабка на газовой камере (слева)
-  k.add(M, G.wire([[300, 4, -11], [300, 4, -18], [314, 4, -20], [320, 4, -11]], 1.8, { n: 30 }));
-  // основание мушки: кольцо, намушник-«уши», мушка, штык-упор
+  k.add(M, G.T(G.extrudeZ(G.rrect(310, 4, 16, 8, 2), 2, { bevel: 0.5 }), { p: [0, 0, -11.6] }));
+  k.add(M, G.wire([[302, 4, -12], [302, 4, -18], [318, 4, -20], [318, 4, -12]], 1.8, { n: 30 }));
+  // основание мушки: кольцо, намушник-«уши», барабан мушки, штифты, штык-упор
   k.add(M, G.extrudeZ([[364, -11, 2], [404, -11, 2], [404, 10, 2], [398, 18, 3], [370, 18, 3], [364, 10, 2]], 20, { bevel: 1.4 }));
-  for (const s of [-1, 1]) k.add(M, G.extrudeZ([[372, 12], [396, 12], [394, 40, 3], [386, AK.SIGHT_Y + 8, 4], [379, AK.SIGHT_Y + 8, 3], [374, 38, 2]], 2.8, { bevel: 0.6, z: s * 7.4 }));
-  k.add('steelWorn', G.cylY(1.9, 16, AK.SIGHT_Y - 1.2, { seg: 12 }), { p: [AK.FRONT_X, 0, 0] });
-  k.add('steelWorn', G.extrudeZ([[AK.FRONT_X - 1.2, AK.SIGHT_Y - 2], [AK.FRONT_X + 1.2, AK.SIGHT_Y - 2], [AK.FRONT_X + 0.9, AK.SIGHT_Y, 0.3], [AK.FRONT_X - 0.9, AK.SIGHT_Y, 0.3]], 2.2, { bevel: 0.2 }));
-  if (o.bayonet) k.add(M, G.extrudeZ([[366, -10], [398, -10], [398, -21, 2], [372, -21, 2]], 11, { bevel: 1 }));
-  // шомпол под стволом
+  for (const s of [-1, 1]) k.add(M, G.extrudeZ([[372, 12], [396, 12], [394, 40, 3], [386, SY + 8, 4], [379, SY + 8, 3], [374, 38, 2]], 2.8, { bevel: 0.6, z: s * 7.4 }));
+  // полозок поправки по горизонту и барабан с риской под мушку
+  k.add(M, G.extrudeZ(G.rrect(FX, 19.4, 16, 3.4, 1), 11.4, { bevel: 0.6 }));
+  k.add('steelWorn', G.T(G.cylY(4.3, 20.8, 26.6, { c: 0.5, seg: 20 }), { p: [FX, 0, 0] }));
+  for (let i = 0; i < 4; i++) k.add('steel', G.T(G.box(1.2, 2.2, 1.2, { bevel: 0.2 }), { p: [FX + 4 * Math.cos(i * Math.PI / 2 + 0.4), 25.6, 4 * Math.sin(i * Math.PI / 2 + 0.4)] }));
+  k.add('steelWorn', G.cylY(1.9, 26, SY - 1.2, { seg: 12 }), { p: [FX, 0, 0] });
+  k.add('steelWorn', G.extrudeZ([[FX - 1.2, SY - 2], [FX + 1.2, SY - 2], [FX + 0.9, SY, 0.3], [FX - 0.9, SY, 0.3]], 2.2, { bevel: 0.2 }));
+  for (const x of [369, 399]) k.add('steelWorn', G.T(G.cylZ(1.8, -10.2, 10.2, { c: 0.3, seg: 12 }), { p: [x, 2, 0] }));
+  // фиксатор дульного устройства (подпружиненный штифт спереди справа)
+  k.add('steelWorn', G.T(G.cylX(1.5, 403, 406.2, { c: 0.4, seg: 10 }), { p: [0, -6.5, 5.5] }));
+  if (o.bayonet) {
+    k.add(M, G.extrudeZ([[366, -10], [400, -10], [400, -16, 1.5], [396, -21, 2], [374, -21, 2], [368, -16, 3]], 11, { bevel: 1 }));
+    // поперечный паз под защёлку штык-ножа
+    for (const s of [-1, 1]) k.add('lensBlack', G.T(G.box(3, 5, 0.6, { bevel: 0.2 }), { p: [390, -16.5, s * 5.35] }));
+  }
+  // шомпол под стволом: головка с поперечным отверстием
   k.add('steelWorn', G.T(G.cylX(3, 214, 402, { c: 0.6, seg: 12 }), { p: [0, -15, 0] }));
-  k.add('steelWorn', G.T(G.latheX([[402, 0], [402, 4.2], [408, 4.2], [410, 2.4], [410, 0]], { seg: 14 }), { p: [0, -15, 0] }));
+  k.add('steelWorn', G.T(G.latheX([[401, 0], [401, 3.6], [402, 4.2], [408.6, 4.2], [410, 2.8], [410, 0]], { seg: 16 }), { p: [0, -15, 0] }));
+  k.add('lensBlack', G.T(G.cylZ(1.3, -4.3, 4.3, { seg: 10 }), { p: [405.6, -15, 0] }));
   return leafNode;
 }
 
 function triggerGroup(ctx, k, nodes, o) {
   const M = o.steel;
-  // спусковая скоба с защёлкой магазина
-  const tg = G.shape([[-78, -24], [-152, -24], [-152, -30, 3], [-140, -44, 6], [-94, -46, 6], [-80, -36, 3]],
-    [[[-86, -26.5], [-146, -26.5], [-137, -40, 5], [-96, -42, 5], [-86, -33, 3]]]);
+  // спусковая скоба: штампованная полоса с выдавленным ребром по середине
+  const tgHole = [[-86, -26.5], [-146, -26.5], [-137, -40, 5], [-96, -42, 5], [-86, -33, 3]];
+  const tg = G.shape([[-78, -24], [-152, -24], [-152, -30, 3], [-140, -44, 6], [-94, -46, 6], [-80, -36, 3]], [tgHole]);
   k.add(M, G.extrudeZ(tg, 10, { bevel: 0.8 }));
-  k.add(M, G.extrudeZ([[-74, -24], [-80, -24], [-84, -40, 2], [-80, -43, 2], [-76, -38]], 12, { bevel: 0.8 }));
+  const rib = G.shape([[-79.4, -25], [-150.8, -25], [-150.8, -30.4, 3], [-139.6, -44.9, 6], [-94.1, -46.9, 6], [-79.2, -36.4, 3]], [tgHole]);
+  k.add(M, G.extrudeZ(rib, 3.6, { bevel: 0.9 }));
+  // защёлка магазина: рычаг на оси в передней части скобы, лопатка с насечкой
+  k.add(M, G.extrudeZ([[-74.8, -25], [-81.5, -25], [-82.5, -31, 1], [-86.5, -40, 2], [-85.4, -44.6, 2.5], [-80.4, -43.8, 2], [-78.6, -38, 2], [-75.6, -31, 2]], 11, { bevel: 1 }));
+  for (let i = 0; i < 4; i++) k.add(M, G.T(G.box(1.2, 0.8, 9, { bevel: 0.3 }), { p: [-86.5 + i * 0.12, -37.8 - i * 1.6, 0] }));
+  k.add('steelWorn', G.T(G.cylZ(1.8, -6.4, 6.4, { c: 0.3, seg: 12 }), { p: [-78, -28.4, 0] }));
+  // спусковой крючок: изогнутое перо с фасками
   const t = ctx.kit();
-  t.add(M, G.extrudeZ([[-2, 3], [3, 3], [3, -6, 2], [0, -17, 4], [-5, -23, 2], [-7, -21], [-3, -8, 3]], 6, { bevel: 0.9 }));
+  t.add(M, G.extrudeZ([[-2, 3], [3, 3], [3, -6, 2], [0.4, -15, 4], [-3.4, -21.2, 2], [-5.4, -23, 1.2], [-7.2, -21.4, 1], [-5.6, -17, 3], [-3, -8, 3]], 6, { bevel: 1.1 }));
   nodes.trigger = G.node('trigger', [t.build()], { p: [-112, -18, 0] });
-  // переводчик: длинный флажок справа, ось сзади; перекрывает паз рукояти
+  // переводчик: штампованный рычаг справа, ось сзади; в положении «П» закрывает паз рукояти
   const s = ctx.kit();
-  s.add(M, G.extrudeZ([[-4, -4, 2], [112, 1, 2], [118, 4, 2], [118, 11, 2], [108, 12, 2], [4, 6, 3], [-4, 4, 2]], 1.6, { bevel: 0.4, z: 16.4 }));
-  s.add(M, G.extrudeZ([[108, 4], [118, 4], [120, -4, 2], [110, -4, 2]], 3, { bevel: 0.8, z: 17 }));
-  s.add(M, G.cylZ(5.5, 15, 17.5, { seg: 20 }));
+  const lever = [[-6, -3.6, 4], [40, -2.2, 10], [104, 0.4, 3], [116, 1.6, 2], [119.4, 5, 1.4], [119.4, 11.2, 1.4], [108, 12.6, 2], [60, 10.6, 20], [8, 7.2, 5], [-6, 5.6, 5]];
+  s.add(M, G.extrudeZ(lever, 1.6, { bevel: 0.5, z: 16.1 }));
+  // усилительная выдавка вдоль рычага
+  s.add(M, G.extrudeZ([[10, 0.6, 1], [96, 3.2, 1], [96, 5.4, 1], [10, 3.8, 1]], 0.8, { bevel: 0.35, z: 17.1 }));
+  // отогнутая наружу полка под палец с поперечной насечкой
+  s.add(M, G.extrudeY(G.shape([[104, 16.4, 0.5], [119.4, 16.4, 0.5], [119.4, 21.4, 2.4], [104, 21.4, 2.4]]), -0.4, 1.2, { bevel: 0.45 }));
+  s.add(M, G.T(G.cylX(1.3, 104.3, 119.1, { c: 0.4, seg: 10 }), { p: [0, 0.6, 16.9] }));
+  for (let i = 0; i < 4; i++) s.add(M, G.T(G.box(1, 0.7, 4, { bevel: 0.2 }), { p: [106.8 + i * 3.6, 1.3, 19.2] }));
+  // ступица на оси
+  s.add(M, G.T(G.latheX([[15.1, 0], [15.1, 6.2], [15.6, 6.6], [17.4, 6.6], [18, 5.8], [18, 2.6], [18.6, 2.2], [18.6, 0]], { seg: 24 }), { r: [0, -90, 0] }));
   nodes.selector = G.node('selector', [s.build()], { p: [-178, 2, 0] });
   return [nodes.trigger, nodes.selector];
 }
@@ -175,7 +251,7 @@ export function akBase(ctx, o) {
   root.add(mount({ id: 'stock', type: 'stock', p: [AK.REAR, 0, 0] }));
   return {
     root, nodes,
-    anim: { carrierTravel: 118, selector: { safe: 0, auto: -11, semi: -22 } },
+    anim: { carrierTravel: 118, selector: { safe: 0, auto: -6.5, semi: -13 } },
     eject: { p: [-48, 6, 16], dir: [0.35, 0.45, 1] },
     muzzle: [AK.MUZZLE, 0, 0],
     irons: { rear: [AK.REAR_X + 2, AK.SIGHT_Y, 0], front: [AK.FRONT_X, AK.SIGHT_Y, 0] },
@@ -208,29 +284,88 @@ function upperSec(r, y0, n = 14) {
   return pts;
 }
 
+// Сглаживание опорных сечений [x, hw, yb]: косинусные вставки между ключами.
+function smoothProf(key, n = 4) {
+  const out = [];
+  for (let i = 0; i < key.length - 1; i++) {
+    const a = key[i], b = key[i + 1];
+    for (let j = 0; j < n; j++) {
+      const t = j / n, e = (1 - Math.cos(Math.PI * t)) / 2;
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * e, a[2] + (b[2] - a[2]) * e]);
+    }
+  }
+  out.push(key[key.length - 1]);
+  return out;
+}
+
+// Точка и нормаль на наружной стороне U-сечения: y — по вертикальной боковине,
+// иначе a — угол по нижнему скруглению (0 — бок, 90° — низ).
+function uPoint(hw, yb, yt, s, q) {
+  const r = Math.min(hw, (yt - yb) * 0.6);
+  if (q.y != null && q.y >= yb + r) return [s * hw, q.y, s, 0];
+  const a = (q.a ?? 0) * Math.PI / 180;
+  const nz = Math.cos(a) / hw, ny = -Math.sin(a) / r, l = Math.hypot(nz, ny);
+  return [s * Math.cos(a) * hw, yb + r - Math.sin(a) * r, (s * nz) / l, ny / l];
+}
+
+// Продольное ребро, повторяющее форму накладки (сечение — сплюснутый овал).
+function uRib(prof, yt, s, q, w = 1.8, h = 1.2, n = 10) {
+  const xs = prof[0][0], xe = prof[prof.length - 1][0];
+  const rings = prof.map(([x, hw, yb]) => {
+    const [z, y, nz, ny] = uPoint(hw, yb, yt, s, q);
+    // концы ребра сходят на нет
+    const f = Math.max(0.04, Math.min(1, (x - xs) / 5, (xe - x) / 5));
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const t = (i / n) * Math.PI * 2, c = Math.cos(t), sn = Math.sin(t);
+      // c — по нормали (наружу), sn — вдоль поверхности
+      const dn = (c * h * 0.5 + h * 0.2) * f - h * 0.35 * (1 - f), dt = sn * w * 0.5 * Math.sqrt(f);
+      pts.push([z + nz * dn - ny * dt, y + ny * dn + nz * dt]);
+    }
+    return { x, pts };
+  });
+  return G.loftX(rings, { crease: 60, flip: true });
+}
+
 function lowerStd(ctx, k, mat, o = {}) {
-  const x0 = AK.FRONT + 2, x1 = 212;
-  // «лопатки» АКМ: расширение у магазина, затем сужение
-  const rings = [];
-  const prof = o.paddle ? [[x0, 22, -22], [x0 + 20, 23.5, -23], [x0 + 55, 21, -22], [x0 + 80, 18.5, -21], [x1 - 10, 18.5, -20], [x1, 18, -19]]
+  const x0 = AK.FRONT + 2, x1 = 212, YT = 11;
+  // АКМ: «лопатки» у магазина; АК-74М: прямая накладка с упором для ладони спереди
+  const key = o.paddle ? [[x0, 22, -22], [x0 + 20, 23.5, -23], [x0 + 55, 21, -22], [x0 + 80, 18.5, -21], [x1 - 10, 18.5, -20], [x1, 18, -19]]
+    : o.ribs ? [[x0, 20.4, -22], [x0 + 40, 20.2, -22.2], [x1 - 22, 19.2, -21.4], [x1 - 9, 21, -24.4], [x1 - 4, 21, -24.4], [x1, 19.4, -21.4]]
     : [[x0, 20, -22], [x1 - 10, 19, -21], [x1, 18.5, -20]];
-  for (const [x, hw, yb] of prof) rings.push({ x, pts: uSec(hw, yb, 11, 3.4, 10) });
-  k.add(mat, G.loftX(rings, { caps: false }));
+  const prof = smoothProf(key, 4);
+  const rings = prof.map(([x, hw, yb]) => ({ x, pts: uSec(hw, yb, YT, 3.4, 12) }));
+  k.add(mat, G.loftX(rings, { caps: false, flip: true }));
   k.add(mat, G.extrudeX(rings[0].pts, x0, x0 + 1.2, { bevel: 0.3 }));
   k.add(mat, G.extrudeX(rings[rings.length - 1].pts, x1 - 1.2, x1, { bevel: 0.3 }));
-  if (o.ribs) for (let i = 0; i < 4; i++) for (const s of [-1, 1]) k.add(mat, G.T(G.box(x1 - x0 - 34, 1.8, 1.4, { bevel: 0.4 }), { p: [(x0 + x1) / 2 + 10, 6 - i * 6.5, s * 19.3] }));
+  // стальной наконечник накладки у ствольной коробки
+  k.add('steel', G.extrudeX(uSec(key[0][1] + 0.6, key[0][2] - 0.6, YT, 1.4, 12), x0 - 1, x0 + 5, { bevel: 0.4 }));
+  if (o.ribs) {
+    // продольные рёбра полиамидной накладки: по боку и по нижнему скруглению
+    const rp = prof.filter(([x]) => x >= x0 + 12 && x <= x1 - 26);
+    for (const s of [-1, 1]) {
+      for (const y of [7.5, 3, -1.5]) k.add(mat, uRib(rp, YT, s, { y }));
+      for (const a of [22, 44, 66]) k.add(mat, uRib(rp, YT, s, { a }));
+    }
+    // поперечная кромка упора ладони
+    for (const s of [-1, 1]) k.add(mat, uRib(prof.filter(([x]) => x >= x1 - 12 && x <= x1 - 3), YT, s, { a: 50 }, 1.2, 0.8));
+  }
 }
 
 function upperStd(ctx, k, mat, o = {}) {
   k.add(mat, G.extrudeX(upperSec(13.2, 12), 100, 288, { bevel: 2 }));
-  if (o.ribs) for (let i = 0; i < 5; i++) { const a = (i - 2) * 24 * Math.PI / 180; k.add(mat, G.T(G.box(160, 1.6, 2, { bevel: 0.4 }), { p: [196, AK.GAS_Y + 13.3 * Math.cos(a), 13.3 * Math.sin(a)], r: [-(i - 2) * 24, 0, 0] })); }
-  // металлический наконечник
+  // продольные рёбра полиамидной накладки: скруглённые, сходят на нет к концам
+  if (o.ribs) for (let i = 0; i < 5; i++) k.add(mat, G.T(G.T(G.cylX(1.3, 114, 278, { c: 1.2, seg: 10 }), { s: [1, 0.6, 1], p: [0, 13.1, 0] }), { r: [(i - 2) * 24, 0, 0] }).translate(0, AK.GAS_Y, 0));
+  // металлический наконечник и полукольцо-фиксатор сзади
   k.add('steel', G.extrudeX(upperSec(13.8, 11), 284, 292, { bevel: 0.8 }));
+  k.add('steel', G.extrudeX(upperSec(13.6, 11.6), 99, 103, { bevel: 0.6 }));
 }
 
 function retainer(ctx, k) {
-  k.add('steel', G.extrudeX(G.shape(uSec(20.2, -22.2, 12, 3, 10).slice(0, 13).concat(uSec(20.2, -22.2, 12, 3, 10).slice(13))), 208, 222, { bevel: 0.8 }));
-  k.add('steel', G.T(G.cylZ(2.4, 19, 21.5, { seg: 12 }), { p: [215, 4, 0] }));
+  k.add('steel', G.extrudeX(G.shape(uSec(20.2, -22.2, 12, 3, 10)), 208, 222, { bevel: 0.8 }));
+  // рычаг защёлки справа на оси, повёрнут вверх (закрыто)
+  k.add('steel', G.T(G.latheX([[0, 0], [0, 3.2], [0.6, 3.2], [1.4, 2.4], [1.6, 0]], { seg: 16 }), { r: [0, -90, 0], p: [215, 4, 20] }));
+  k.add('steel', G.extrudeZ([[212.2, 3, 2.4], [217.8, 3, 2.4], [217, 16, 2], [213.4, 16, 2]], 1.6, { bevel: 0.5, z: 21 }));
   k.add('steel', G.T(G.cylZ(3.6, -12, 12, { seg: 16 }), { p: [215, -15, 0] }));
 }
 
@@ -467,30 +602,55 @@ export function akMag(ctx, o) {
   const shiftX = -front[0][0], shiftY = 0;
   const P = [[front[0][0], 12], [back[0][0], 12], ...back.slice(1), ...front.slice().reverse()].map(([x, y]) => [x + shiftX, y + shiftY]);
   k.add(o.mat, G.extrudeZ(P.map((p) => [...p, 0]), W, { bevel: o.bevel ?? 1.2 }));
-  const endA = ang0 + L / R;
-  const ex = cx + Math.cos(endA) * R + shiftX, ey = cy + Math.sin(endA) * R;
-  // выштамповки / рёбра на боковинах
+  const at = (i) => { const u = i / n, a = ang0 + (u * L) / R; return { a, d: D0 + (D1 - D0) * u, x: cx + Math.cos(a) * R + shiftX, y: cy + Math.sin(a) * R }; };
+  const steel = o.mat.startsWith('steel');
+  const lugM = steel ? o.mat : 'steel';   // зацепы полимерных магазинов — стальные вставки
+  // продольные рёбра вдоль дуги (полимер, бакелит): приплюснутые валики
   if (o.ribs) {
     const m = 4;
     for (let j = 1; j < m; j++) {
       const pts = [];
       for (let i = 1; i < n; i++) {
-        const s = (i / n) * L, a = ang0 + s / R, d = D0 + (D1 - D0) * (i / n);
-        const t = j / m - 0.5;
-        pts.push([cx + Math.cos(a) * (R + t * d) + shiftX, Math.sin(a) * (R + t * d), 0]);
+        const q = at(i), t = j / m - 0.5;
+        pts.push([cx + Math.cos(q.a) * (R + t * q.d) + shiftX, Math.sin(q.a) * (R + t * q.d), 0]);
       }
-      for (const s of [-1, 1]) k.add(o.ribMat || o.mat, G.wire(pts.map((p) => [p[0], p[1], s * (W / 2 + 0.2)]), 1.3, { n: 40, seg: 6 }));
+      for (const s of [-1, 1]) k.add(o.ribMat || o.mat, G.T(G.wire(pts, 1.4, { n: 50, seg: 8 }), { s: [1, 1, 0.55] }).translate(0, 0, s * (W / 2 - 0.1)));
     }
+    // поперечный поясок под горловиной
+    for (const s of [-1, 1]) k.add(o.mat, G.T(G.T(G.cylX(1.3, -(D0 - 10) / 2, (D0 - 10) / 2, { c: 1.1, seg: 10 }), { s: [1, 1, 0.5] }), { p: [-D0 / 2, -4, s * (W / 2 - 0.1)] }));
   }
-  if (o.cross) for (let i = 2; i < n - 1; i += 3) {
-    const s = (i / n) * L, a = ang0 + s / R, d = D0 + (D1 - D0) * (i / n);
-    for (const sd of [-1, 1]) k.add(o.mat, G.T(G.box(d - 10, 2.2, 1.4, { bevel: 0.5 }), { p: [cx + Math.cos(a) * R + shiftX, Math.sin(a) * R, sd * (W / 2 + 0.3)], r: [0, 0, a * 57.3] }));
+  // поперечные выштамповки стального магазина: скруглённые валики, частый шаг
+  if (o.cross) for (let i = 2; i <= n - 2; i += 2) {
+    const q = at(i), h = (q.d - 16) / 2;
+    for (const sd of [-1, 1]) k.add(o.mat, G.T(G.T(G.cylX(2.6, -h, h, { c: 2.2, seg: 12 }), { s: [1, 1, 0.36] }), { r: [0, 0, q.a * 57.2958], p: [q.x, q.y, sd * (W / 2 - 0.1)] }));
   }
-  // затыльник и передний зацеп
+  // сварные швы-корешки спереди и сзади (сталь)
+  if (steel) for (const edge of [back, front]) {
+    const pts = edge.slice(1, n).map(([x, y], i) => { const q = at(i + 1), sg = edge === back ? 1 : -1; return [x + shiftX + sg * Math.cos(q.a) * 0.2, y + sg * Math.sin(q.a) * 0.2, 0]; });
+    k.add(o.mat, G.T(G.wire(pts, 1.6, { n: 50, seg: 8 }), { s: [1, 1, 1.4] }));
+  }
+  // крышка: x — вдоль торца (назад), y — наружу
+  const endA = ang0 + L / R;
+  const ex = cx + Math.cos(endA) * R + shiftX, ey = cy + Math.sin(endA) * R;
   const tx = -Math.sin(endA), ty = Math.cos(endA);
-  k.add(o.plate || o.mat, G.T(G.box(D1 + 7, 6, W + 3, { bevel: 1.6 }), { p: [ex + tx * 2, ey + ty * 2, 0], r: [0, 0, endA * 57.3] }));
-  k.add(o.mat, G.T(G.box(8, 6, W - 6), { p: [2, 8, 0] }));
-  k.add(o.mat, G.T(G.box(6, 5, W - 4), { p: [-D0 + 4, 9, 0] }));
+  const plateT = () => ({ r: [0, 0, endA * 57.2958], p: [ex + tx * 2, ey + ty * 2, 0] });
+  const PM = o.plate || o.mat;
+  k.add(PM, G.box(D1 + 7, 6, W + 3, { bevel: 1.6 }), plateT());
+  // отбортовки крышки по бокам, заходящие на корпус
+  for (const s of [-1, 1]) k.add(PM, G.T(G.box(D1 + 2, 5, 1.2, { bevel: 0.4 }), { p: [0, -4.4, s * (W / 2 + 0.7)] }), plateT());
+  if (steel) {
+    // продольный валик и две выштамповки на днище
+    k.add(PM, G.T(G.box(D1 - 12, 1.4, 7, { bevel: 0.6 }), { p: [0, 3.2, 0] }), plateT());
+    for (const x of [-(D1 / 2) + 8, D1 / 2 - 8]) k.add(PM, G.T(G.tubeX(2.8, 1.6, 0, 0.6, { seg: 16, c: 0.2 }), { r: [0, 0, 90], p: [x, 2.8, 0] }), plateT());
+  } else {
+    // отверстие под выступ стопорной планки и задний козырёк
+    k.add('lensBlack', G.T(G.cylY(3.2, 2.9, 3.15, { seg: 16, c: 0.05 }), { p: [0, 0, 0] }), plateT());
+    k.add('steel', G.T(G.cylY(2.2, 2.4, 3.1, { seg: 12, c: 0.3 }), { p: [0, 0, 0] }), plateT());
+    k.add(PM, G.T(G.box(4, 7, W - 4, { bevel: 1.2 }), { p: [D1 / 2 + 3.5, 0.8, 0] }), plateT());
+  }
+  // передний зацеп и задний выступ под защёлку
+  k.add(lugM, G.T(G.box(8, 6, W - 6, { bevel: 0.8 }), { p: [2, 8, 0] }));
+  k.add(lugM, G.T(G.box(3.4, 6.4, W - 8, { bevel: 0.8 }), { p: [-D0 - 0.9, 2.4, 0] }));
   // верхние патроны в подающих губках
   const cal = o.cal;
   ctx.C.feedLips(k, o.mat, -D0 + 6, -D0 + 42, 12, W / 2, { rise: 5.2, curl: 3.4 });
@@ -520,7 +680,8 @@ function akGrip(ctx, o) {
   const back = o.back.map(([f, y]) => [sh(y) + f, y]);
   const W = o.w ?? 30;
   // скруглённое тело по контурам; у АК рукоять почти одинаковой ширины по высоте
-  k.add(o.mat, G.gripLoft(front, back, { w: W, k: 2.8, taper: 0.22, width: (t) => 0.9 + 0.1 * Math.sin(Math.PI * t) }));
+  const body = G.gripLoft(front, back, { w: W, k: 2.8, taper: 0.22, width: (t) => 0.9 + 0.1 * Math.sin(Math.PI * t) });
+  k.add(o.mat, body);
   // вертикальные рифы бакелитовой рукояти АКМ (по боковой плоскости)
   if (o.grooves) for (let i = 0; i < o.grooves; i++) for (const s of [-1, 1]) {
     k.add(o.mat, G.T(G.box(1.6, 58, 1.2, { bevel: 0.5 }), { p: [sh(-52) - 9 - i * 3.3, -52, s * (W / 2 * 0.93 - 0.3)], r: [0, 0, -o.angle] }));
@@ -538,17 +699,42 @@ function stockLoft(prof, k = 3.4) {
   return G.loftX(prof.map(([x, cy, hh, hw]) => ({ x, pts: G.superEllipse(hw, hh, k, 28, cy, 0) })));
 }
 
+// Волокна дерева — вдоль оси приклада (u по направлению падения гребня), а не по горизонтали.
+function grainAlong(g, dx, dy) {
+  const l = Math.hypot(dx, dy), c = dx / l, s = dy / l;
+  const p = g.attributes.position, uv = g.attributes.uv;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    uv.setXY(i, x * c + y * s, -x * s + y * c + z);
+  }
+  return g;
+}
+
+// Винт с прямым шлицем: головка смотрит вдоль −X (затыльник).
+function slotScrew(k, x, y, z = 0, r = 3.2) {
+  k.add('steelWorn', G.T(G.latheX([[0, 0], [0, r], [0.5, r - 0.1], [1.1, r * 0.75], [1.3, 0]], { seg: 16 }), { r: [0, 180, 0], p: [x, y, z] }));
+  k.add('lensBlack', G.T(G.box(0.9, 0.8, r * 1.8, { bevel: 0.1 }), { p: [x - 1.05, y, z] }));
+}
+
 function stockAKM(ctx) {
   const k = ctx.kit();
-  // ламинированный деревянный приклад АКМ: прямой гребень, затыльник с люком
+  // клеёный деревянный приклад АКМ: прямой гребень, стальной затыльник с пеналом
   const prof = [[-2, -6, 18, 14.6], [-30, -12, 22, 16], [-80, -26, 34, 17.6], [-140, -42, 48, 19], [-196, -60, 60, 20.4], [-206, -63, 62, 20.6]];
-  k.add('wood', stockLoft(prof));
+  k.add('wood', grainAlong(stockLoft(prof), 204, 57));
+  // затыльник: чашка, заходящая на дерево, и крышка пенала на шарнире
   k.add('steel', G.extrudeX(G.shape(G.superEllipse(21, 63, 3.4, 28, -63, 0)), -212, -205, { bevel: 1.2 }));
-  k.add('steel', G.extrudeX(G.rrect(0, -80, 24, 44, 8), -213, -211.5, { bevel: 0.3 }));
-  k.add('steel', G.T(G.cylZ(2.2, -12, 12, { seg: 12 }), { p: [-212, -62, 0] }));
-  for (const y of [-10, -114]) k.add('steel', G.T(G.cylX(2.6, -214, -211, { seg: 12 }), { p: [0, y, 0] }));
-  // хвостовик коробки и антабка слева
-  k.add('steel', G.extrudeZ([[4, 6], [-30, -2], [-30, -8], [4, -2]], 12, { bevel: 0.6 }));
+  k.add('steel', G.extrudeX(G.shape(G.superEllipse(21.4, 63.4, 3.4, 28, -63, 0), [G.superEllipse(20.2, 62.2, 3.4, 28, -63, 0)]), -206, -202.5, { bevel: 0.5 }));
+  const door = G.rrect(0, -80, 24, 44, 8);
+  k.add('lensBlack', G.extrudeX(G.shape(G.rrect(0, -80, 25.2, 45.2, 8.4), [door]), -212.25, -211.8, { bevel: 0.05 }));
+  k.add('steel', G.extrudeX(G.rrect(0, -80, 23.4, 43.4, 7.8), -212.7, -211.6, { bevel: 0.4 }));
+  k.add('steelWorn', G.T(G.cylZ(1.5, -7, 7, { seg: 12, c: 0.3 }), { p: [-212.6, -57.2, 0] }));
+  k.add('steel', G.T(G.tubeX(3.4, 2, 0, 0.5, { seg: 18, c: 0.15 }), { r: [0, 180, 0], p: [-212.6, -92, 0] }));
+  for (const y of [-10, -116]) slotScrew(k, -212, y);
+  // хвостовик коробки с шурупом крепления и антабка слева
+  k.add('steel', G.extrudeZ([[4, 6], [-30, -2, 2], [-30, -8, 2], [4, -2]], 12, { bevel: 0.6 }));
+  k.add('steelWorn', G.T(G.latheX([[0, 0], [0, 3], [0.5, 2.9], [1.1, 2.2], [1.3, 0]], { seg: 16 }), { r: [0, 0, 90], p: [-22, 0.2, 0] }));
+  k.add('lensBlack', G.T(G.box(5.4, 0.8, 0.9, { bevel: 0.1 }), { p: [-22, 1.3, 0], r: [0, 30, 0] }));
+  k.add('steel', G.extrudeZ(G.rrect(-175, -64, 26, 9, 3), 1.6, { bevel: 0.4, z: -20.4 }));
   k.add('steel', G.wire([[-166, -64, -20], [-166, -64, -27], [-184, -64, -27], [-184, -64, -20]], 1.8, { n: 30 }));
   return { root: k.build('akm_wood'), cheek: { x: -60, y: 8 } };
 }
@@ -558,17 +744,34 @@ function stockAK74M(ctx) {
   const prof = [[-10, -6, 18, 15], [-40, -13, 23, 16.5], [-90, -28, 36, 18], [-150, -44, 49, 19.4], [-205, -62, 60, 20.6], [-214, -64, 61, 20.6]];
   const f = ctx.kit();
   f.add('poly', stockLoft(prof, 3.8));
-  // продольная выборка по бокам и затыльник с рёбрами
-  for (const s of [-1, 1]) f.add('polySoft', G.T(G.extrudeZ([[-40, -18, 6], [-180, -58, 10], [-180, -96, 10], [-60, -40, 6]], 1, { bevel: 0.3 }), { p: [0, 0, s * 18.6] }));
+  // боковые выборки облегчения: тёмная панель в приподнятой отбортовке; плоскость
+  // наклонена за расширением приклада (≈0,025 мм/мм), держится по средней линии сечения
+  const win = [[-50, -6], [-180, -31], [-180, -78], [-56, -27]];
+  for (const s of [-1, 1]) {
+    const t = { r: [0, s * 1.455, 0], p: [0, 0, 0] };
+    f.add('polySoft', G.T(G.extrudeZ([[-50, -6, 6], [-180, -31, 10], [-180, -78, 10], [-56, -27, 6]], 1, { bevel: 0.3, z: s * 15.18 }), t));
+    const loop = [];
+    for (let i = 0; i < 4; i++) { const a = win[i], b = win[(i + 1) % 4]; for (let j = 0; j < 6; j++) { const u = j / 6; loop.push([a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, s * 15.33]); } }
+    f.add('poly', G.T(G.wire(loop, 0.9, { closed: true, n: 120, seg: 6, tension: 0.2 }), t));
+  }
+  // резиновый затыльник с поперечной насечкой и прилив под антабку
   f.add('rubber', G.extrudeX(G.shape(G.superEllipse(21.4, 62, 3.8, 28, -64, 0)), -224, -213, { bevel: 2 }));
-  for (let i = 0; i < 9; i++) f.add('rubber', G.T(G.box(2, 2.4, 38), { p: [-224, -16 - i * 12, 0] }));
-  // узел складывания (шарнир слева)
+  for (let i = 0; i < 9; i++) f.add('rubber', G.T(G.cylZ(1.1, -18.5, 18.5, { seg: 8, c: 0.8 }), { p: [-224.4, -16 - i * 12, 0] }));
+  f.add('poly', G.extrudeX(G.shape(G.superEllipse(21.2, 61.2, 3.8, 28, -64, 0)), -214, -211, { bevel: 0.8 }));
+  f.add('steel', G.extrudeZ(G.rrect(-196, -64, 20, 8, 3), 1.6, { bevel: 0.4, z: -20.8 }));
+  f.add('steel', G.wire([[-189, -64, -20.5], [-189, -64, -27], [-203, -64, -27], [-203, -64, -20.5]], 1.8, { n: 30 }));
+  // узел складывания со стороны приклада: колодка и петли шарнира
   f.add('steel', G.extrudeX(G.rrect(0, -4, 30, 26, 3), -14, -1, { bevel: 1 }));
+  f.add('steel', G.extrudeX(G.rrect(0, -4, 31.4, 27.4, 3.4), -16, -13, { bevel: 0.6 }));
+  for (const y of [-14, 2]) f.add('steel', G.T(G.cylY(5.2, y, y + 7, { c: 0.6, seg: 18 }), { p: [0, 0, -22] }));
   const fold = G.node('fold', [f.build()]);
-  // шарнир с кнопкой на коробке
+  // ответная часть на коробке: петли, ось с головками, кнопка фиксатора с насечкой
   k.add('steel', G.extrudeZ([[4, 10], [-4, 10], [-4, -22], [4, -22]], 12, { bevel: 1, z: -20 }));
-  k.add('steel', G.T(G.cylY(4, -22, 11, { seg: 16 }), { p: [0, 0, -22] }));
-  k.add('steel', G.T(G.cylZ(5.5, 8, 13, { seg: 18 }), { p: [-2, -4, 0] }));
+  for (const y of [-21, -7, 9]) k.add('steel', G.T(G.cylY(5, y, y + (y === 9 ? 2 : 7), { c: 0.6, seg: 18 }), { p: [0, 0, -22] }));
+  for (const [y, d] of [[11, 1], [-22, -1]]) k.add('steelWorn', G.T(G.latheX([[0, 0], [0, 3], [0.5, 2.9], [1, 2.2], [1.2, 0]], { seg: 14 }), { r: [0, 0, d * 90], p: [0, y, -22] }));
+  // кнопка фиксатора — слева на заднем вкладыше коробки
+  k.add('steel', G.T(G.cylZ(5.4, -16.4, -14.9, { seg: 20, c: 0.4 }), { p: [12, 5, 0] }));
+  k.add('steelWorn', G.T(ctx.C.knob(4.4, 3.4, 16), { r: [0, 90, 0], p: [12, 5, -16.2] }));
   fold.position.set(0, 0, -22);
   fold.children[0].position.set(0, 0, 22);
   return { root: G.node('ak74m_fold', [k.build(), fold]), fold: { node: fold, axis: 'y', angle: -172 }, cheek: { x: -70, y: 8 } };

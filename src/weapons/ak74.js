@@ -14,7 +14,7 @@ export default {
   base: { weight: 2020, length: 860, ergo: 48, recoilV: 92, recoilH: 90, moa: 2.4, velocity: 900, range: 450, loud: 158, flash: 60, adsTime: 290, rpm: 650, mag: 30 },
   audio: { cal: '545', mech: 0.95 },
   modes: ['safe', 'auto', 'semi'],
-  build: (ctx) => akBase(ctx, { id: 'ak74', steel: 'steel', dimples: false, gas45: true, bayonet: true }),
+  build: (ctx) => akBase(ctx, { id: 'ak74', steel: 'steel', dimples: true, gas45: true, bayonet: true }),
   slots: akSlots(),
   parts: akParts('ak74'),
   defaults: {

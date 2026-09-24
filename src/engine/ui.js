@@ -51,13 +51,15 @@ export class UI {
 
     // нижняя панель
     this.ammo = el('div', 'panel ammo');
+    this.power = el('div', 'panel power');
     this.bar = el('div', 'panel bar');
     this.help = el('div', 'panel help', `<div class="h-t">Управление</div>
       <div><kbd>Пробел</kbd>огонь (в прицеле — ЛКМ)</div><div><kbd>ПКМ</kbd><kbd>F</kbd>прицелиться</div>
       <div><kbd>R</kbd>перезарядка</div><div><kbd>X</kbd>режим огня</div><div><kbd>V</kbd>сменить прицел</div>
       <div><kbd>N</kbd>откинуть увеличитель</div><div><kbd>Колесо</kbd>кратность / зум</div>
       <div><kbd>C</kbd>фонарь</div><div><kbd>Z</kbd>ЛЦУ</div><div><kbd>B</kbd>сошки</div><div><kbd>K</kbd>приклад</div>
-      <div><kbd>T</kbd>затвор</div><div><kbd>M</kbd>магазин</div><div><kbd>H</kbd>эта подсказка</div>
+      <div><kbd>T</kbd>затвор</div><div><kbd>M</kbd>магазин</div><div><kbd>G</kbd>замена батарей</div>
+      <div><kbd>L</kbd>день / ночь</div><div><kbd>H</kbd>эта подсказка</div>
       <div class="h-n">Клик по детали — открыть её слот. Перетаскивание — вращение, колесо — масштаб.</div>`);
     this.helpBtn = el('button', 'btn help-btn', '?');
     this.helpBtn.title = 'Управление (H)';
@@ -68,7 +70,7 @@ export class UI {
     this.nvEl = el('div', 'nv-ov');
     this.adsHint = el('div', 'ads-hint');
     const bottom = el('div', 'bottom');
-    bottom.append(this.ammo, this.bar, modsToggle, this.helpBtn);
+    bottom.append(this.ammo, this.power, this.bar, modsToggle, this.helpBtn);
     root.append(left, this.mods, bottom, this.help, this.toastEl, this.tipEl, this.nvEl, this.scopeEl, this.adsHint);
     this.buildBar();
     if (innerWidth > 900) root.classList.add('show-mods');
@@ -97,6 +99,8 @@ export class UI {
       mag3: b('mag3', 'Увеличитель', () => a.toggleMagnifier()),
       light: b('light', 'Фонарь', a.toggleLight),
       laser: b('laser', 'ЛЦУ', a.toggleLaser),
+      batt: b('batt', 'Батареи', a.changeBatteries),
+      night: b('night', 'Ночь', a.toggleNight),
       bipod: b('bipod', 'Сошки', a.toggleBipod),
       fold: b('fold', 'Приклад', a.toggleFold),
       sound: b('sound', 'Звук', a.toggleSound, 'icon'),
@@ -215,7 +219,9 @@ export class UI {
   hud() {
     const a = this.app, st = a.st;
     // вызывается каждый кадр — трогаем DOM только при изменении состояния
-    const key = [st.mag, st.magIn, st.chambered, st.cap, st.mode, st.busy, st.holdOpen, st.ads, st.sightIdx, st.zoom.toFixed(2), st.magAside, st.light, st.laser, st.bipod, st.folded,
+    const bi = a.batteryInfo();
+    const bkey = bi.map((d) => d.key + Math.ceil(d.lv * 100) + (d.on ? 1 : 0)).join(',');
+    const key = [bkey, st.night, st.battBusy, st.mag, st.magIn, st.chambered, st.cap, st.mode, st.busy, st.holdOpen, st.ads, st.sightIdx, st.zoom.toFixed(2), st.magAside, st.light, st.laser, st.bipod, st.folded,
       a.audio.muted, a.sights.length, a.sights[st.sightIdx]?.label, a.asm.installed.size].join('|');
     if (key === this.hudKey && this.lastStats === st.stats && this.hudCfg === a.cfg) return;
     this.hudKey = key; this.hudCfg = a.cfg;
@@ -238,6 +244,11 @@ export class UI {
     B.light.classList.toggle('on', st.light);
     B.laser.hidden = !a.asm.withInfo('laser').length;
     B.laser.classList.toggle('on', st.laser);
+    B.batt.hidden = !bi.length;
+    B.batt.disabled = st.busy;
+    B.night.textContent = st.night ? 'День' : 'Ночь';
+    B.night.classList.toggle('on', st.night);
+    this.renderPower(bi);
     B.bipod.hidden = !a.asm.withInfo('bipod').length;
     B.bipod.classList.toggle('on', st.bipod);
     B.fold.hidden = !a.asm.withInfo('fold').length;
@@ -250,6 +261,21 @@ export class UI {
     this.adsHint.classList.toggle('on', !!(st.ads && s));
     this.root.classList.toggle('ads', st.ads);
     if (this.lastStats !== st.stats) { this.lastStats = st.stats; this.renderStats(); }
+  }
+
+  // Заряд батарей тактических модулей: полоска, процент, остаток работы при текущем режиме.
+  renderPower(bi) {
+    this.power.hidden = !bi.length;
+    if (!bi.length) return;
+    const icon = { light: 'Фонарь', laser: 'ЛЦУ', combo: 'Блок' };
+    this.power.innerHTML = bi.map((d) => {
+      const pct = Math.ceil(d.lv * 100);
+      const cls = d.lv <= 0 ? 'dead' : d.lv < 0.15 ? 'low' : d.lv < 0.4 ? 'mid' : '';
+      const m = Math.max(0, d.min);
+      const left = d.lv <= 0 ? 'разряжена' : m >= 1 ? `≈ ${Math.round(m)} мин` : `≈ ${Math.max(1, Math.round(m * 60))} с`;
+      return `<div class="p-r ${cls}${d.on ? ' on' : ''}" title="${esc(d.name)} · ${esc(d.cells)}"><span class="p-n">${icon[d.kind]}</span>
+        <span class="p-b"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></span><b>${pct}%</b><small>${left}</small></div>`;
+    }).join('');
   }
 
   // Ночной монокуляр: зелёный люминофор, круглое поле зрения.

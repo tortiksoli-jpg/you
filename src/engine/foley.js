@@ -156,6 +156,23 @@ class Track {
     return this.mass(t + 0.001, level * 0.5, 120, 0.02);
   }
 
+  // Ткань и снаряжение: шуршание нейлона (полосовой шум с рваной огибающей) и хруст складок.
+  cloth(t, dur, level, o = {}) {
+    const sr = this.sr, i0 = Math.floor(t * sr), n = Math.min(this.d.length - i0, Math.floor(dur * sr));
+    if (n <= 0) return this;
+    const b = new Float32Array(n);
+    let env = 0, target = 0, next = 0;
+    for (let i = 0; i < n; i++) {
+      if (i >= next) { target = R() < 0.25 ? 0.15 : 0.4 + R() * 0.6; next = i + Math.round(sr * (0.006 + R() * 0.02)); }
+      env += (target - env) * 0.004;
+      const k = i / n, shape = Math.sin(Math.PI * Math.min(1, k * 1.05)) ** 0.7;
+      b[i] = (R() * 2 - 1) * env * shape * (R() < 0.003 ? 4 : 1);
+    }
+    biquad(b, sr, 'bp', o.f ?? 2400, 0.55); biquad(b, sr, 'hp', 700, 0.7);
+    for (let i = 0; i < n; i++) this.d[i0 + i] += b[i] * level;
+    return this;
+  }
+
   buffer(ctx) {
     const d = this.d, sr = this.sr;
     // сухой «воздух» вокруг: убрать инфранизы, мягко ограничить пики
@@ -180,6 +197,9 @@ const RECIPES = {
   // под собственным весом (трение о шахту, патроны шевелятся).
   // АК: нажим на рычаг защёлки, магазин проворачивают вперёд и выводят зацеп.
   magOut(T, o) {
+    const fr = o.fill === 0 ? 0 : o.fill === 1 ? 0.7 : 1;       // патроны шевелятся только в непустом
+    const r0 = T.rattle.bind(T);
+    T.rattle = (t, dur, lv, n) => (fr ? r0(t, dur, lv * fr, n) : T.hit(t + dur * 0.5, lv * 0.6, 'small', { tc: 0.0002, damp: 1.4 }));
     if (o.fam === 'ak') {
       T.hit(0, 0.35, 'small', { tc: 0.0015, noise: 0.002, grit: 0.2 });           // палец на рычаге
       T.hit(0.03, 0.7, 'steel', { tc: 0.00012, click: 0.25 });                   // защёлка вышла из упора
@@ -261,17 +281,48 @@ const RECIPES = {
     T.mass(0.043, 0.45, 140, 0.028);
   },
   // Магазин падает на бетон и подпрыгивает.
+  // Магазин о бетонный пол. Полный — тяжёлый глухой удар и почти без отскока;
+  // пустой — лёгкий, звонкий, скачет и дребезжит пружиной с подавателем.
   magGround(T, o) {
     const steel = o.kind === 'steel';
-    T.hit(0, 0.9, 'ground', { tc: 0.0006 });
-    T.hit(0.001, 0.8, magB(o), { tc: steel ? 0.00015 : 0.0005, click: steel ? 0.2 : 0.05 });
-    T.mass(0, 0.4, 110, 0.02);
-    T.rattle(0.002, 0.08, 0.2, 8);
-    const b = 0.1 + R() * 0.05;
-    T.hit(b, 0.35, magB(o), { tc: steel ? 0.0002 : 0.0006 });
-    T.hit(b, 0.3, 'ground', { tc: 0.0008 });
-    T.hit(b + 0.06 + R() * 0.03, 0.15, magB(o), { tc: 0.0005 });
+    const full = o.fill === 2, empty = o.fill === 0;
+    const ground = { ...BODY.ground, f0: 220, f1: 5200, tau: 0.005 };
+    T.hit(0, full ? 1 : 0.75, ground, { tc: full ? 0.0009 : 0.0005 });
+    T.hit(0.001, full ? 0.7 : 0.85, magB(o), { tc: steel ? 0.00015 : 0.0005, click: steel ? 0.25 : 0.06 });
+    T.mass(0, full ? 0.6 : 0.25, full ? 95 : 140, 0.02);
+    if (!empty) T.rattle(0.002, 0.08, full ? 0.28 : 0.2, full ? 10 : 6);
+    else { T.hit(0.004, 0.3, 'small', { tc: 0.0002 }); T.hit(0.03, 0.2, 'small', { tc: 0.0002 }); }
+    let t = 0.08 + R() * 0.04, a = full ? 0.25 : 0.55;
+    for (let i = 0; i < (full ? 1 : 3); i++) {
+      T.hit(t, a, magB(o), { tc: steel ? 0.0002 : 0.0006 });
+      T.hit(t, a * 0.8, ground, { tc: 0.0006 });
+      if (empty) T.hit(t + 0.003, a * 0.4, 'small', { tc: 0.0002 });
+      t += (0.07 + R() * 0.05) * (1 - i * 0.3); a *= 0.5;
+    }
   },
+  // Магазин из подсумка: рука, шуршание нейлона, магазин выходит из кармана, патроны.
+  pouch(T, o) {
+    T.cloth(0, 0.34, 0.5, { f: 2100 });
+    T.hit(0.05, 0.25, 'poly', { tc: 0.003, noise: 0.004, grit: 0.3 });          // пальцы на магазине
+    T.scrape(0.12, 0.16, 0.3, magB(o), { rate: 400, rate1: 250, tc: 0.0004, hiss: 0.45, hissF: 1800 });
+    T.rattle(0.15, 0.16, 0.12, 6);
+    T.hit(0.29, 0.2, magB(o), { tc: 0.0006 });                                    // вышел из кармана
+    T.cloth(0.3, 0.12, 0.25, { f: 2800 });
+  },
+  // Проверка посадки: рывок магазина вниз — стук в защёлку.
+  tug(T, o) {
+    T.hit(0, 0.35, magB(o), { tc: 0.0004 });
+    T.hit(0.002, 0.25, 'small', { tc: 0.00015 });
+    T.rattle(0.003, 0.03, 0.06, 3);
+  },
+  // Вскидка: ткань, приклад в плечо (глухой удар в плечевую накладку).
+  shoulder(T) {
+    T.cloth(0, 0.16, 0.35, { f: 2000 });
+    T.hit(0.11, 0.3, 'poly', { tc: 0.004, noise: 0.004, grit: 0.2, damp: 0.6 });
+    T.mass(0.11, 0.2, 90, 0.03);
+  },
+  // Опускание оружия.
+  unshoulder(T) { T.cloth(0, 0.14, 0.25, { f: 2300 }); },
   // Спуск без выстрела: удар курка по ударнику.
   dryFire(T, o) {
     T.hit(0, 0.25, 'small', { tc: 0.0001 });                                       // срыв шептала
@@ -296,6 +347,14 @@ const RECIPES = {
     T.hit(cyc * 0.85, 0.7, 'steel', { tc: 0.0001, click: 0.15 });
     T.hit(cyc * 0.85, 0.5, recv(o), { tc: 0.00015 });
   },
+  // Литиевые элементы CR123A: стальной корпус, щёлкают друг о друга и о трубку фонаря.
+  battCells(T) {
+    const cell = { ...BODY.small, f0: 1500, f1: 9000, tau: 0.004, n: 26 };
+    T.scrape(0, 0.08, 0.15, 'alu', { rate: 700, tc: 0.0002, hiss: 0.15 });
+    T.hit(0.07, 0.5, cell, { tc: 0.00015, click: 0.1 });
+    T.hit(0.1 + R() * 0.02, 0.35, cell, { tc: 0.00015 });
+    T.hit(0.2, 0.25, 'poly', { tc: 0.002, noise: 0.003 });
+  },
   // Гильза о бетон: тонкостенная латунная (стальная) трубка звенит коротко.
   casing(T, o) {
     const body = o.kind === 'steel' ? { ...BODY.magSteel, f0: 1800, f1: 9000, tau: 0.02, n: 30 } : { ...BODY.brass, f0: 2600, f1: 11000, tau: 0.03, n: 26, decK: 0.5 };
@@ -305,13 +364,13 @@ const RECIPES = {
   },
 };
 
-const LEN = { magOut: 0.3, magInsert: 0.16, magIn: 0.16, chargeBack: 0.26, chargeRelease: 0.16, boltCatch: 0.14, magGround: 0.32, dryFire: 0.08, selector: 0.08, click: 0.05, tick: 0.06, cycle: 0.14, casing: 0.36 };
+const LEN = { pouch: 0.48, tug: 0.08, shoulder: 0.22, unshoulder: 0.16, battCells: 0.3, magOut: 0.3, magInsert: 0.16, magIn: 0.16, chargeBack: 0.26, chargeRelease: 0.16, boltCatch: 0.14, magGround: 0.5, dryFire: 0.08, selector: 0.08, click: 0.05, tick: 0.06, cycle: 0.14, casing: 0.36 };
 const VARIANTS = 3;
 
 export class Foley {
   constructor(ctx) { this.ctx = ctx; this.cache = new Map(); }
   buffer(name, o = {}) {
-    const key = name + '|' + (o.fam || '') + '|' + (o.kind || '') + '|' + (o.cal || '') + '|' + (o.rpm || '');
+    const key = name + '|' + (o.fam || '') + '|' + (o.kind || '') + '|' + (o.cal || '') + '|' + (o.rpm || '') + '|' + (o.fill ?? '');
     let list = this.cache.get(key);
     if (!list) {
       list = [];
