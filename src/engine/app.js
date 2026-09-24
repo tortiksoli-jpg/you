@@ -19,6 +19,9 @@ const ease = (t) => t * t * (3 - 2 * t);
 // Сила отдачи по калибрам (градусы подброса на выстрел при recoilV = 100).
 const KICK = { '556': 0.75, '545': 0.7, '762x39': 1.15, '762x51': 1.6 };
 
+// Все прицельные оси модуля: основная + дополнительные (info.sights).
+const sightsOf = (info) => (info ? [info.sight, ...(info.sights || [])].filter(Boolean) : []);
+
 class Tweens {
   constructor() { this.list = []; }
   add(obj, key, to, dur, ease = (t) => t, done) {
@@ -98,14 +101,15 @@ export async function boot(def, lib) {
     st.stats = asm.stats();
     // прицельные: стенсил линз и сетки «в бесконечности»
     for (const it of asm.installed.values()) {
-      const s = it.info?.sight;
-      if (!s || !s.lens || s.lens.userData.stencilSet) continue;
-      const ref = stencilRef++;
-      const m = s.lens.material;
-      m.stencilWrite = true; m.stencilRef = ref; m.stencilFunc = THREE.AlwaysStencilFunc;
-      m.stencilZPass = THREE.ReplaceStencilOp;
-      s.lens.userData.stencilSet = true;
-      if (s.reticle) (s.node || it.obj).add(reticleMesh(s.reticle, s, ref));
+      for (const s of sightsOf(it.info)) {
+        if (!s.lens || s.lens.userData.stencilSet) continue;
+        const ref = stencilRef++;
+        const m = s.lens.material;
+        m.stencilWrite = true; m.stencilRef = ref; m.stencilFunc = THREE.AlwaysStencilFunc;
+        m.stencilZPass = THREE.ReplaceStencilOp;
+        s.lens.userData.stencilSet = true;
+        if (s.reticle) (s.node || it.obj).add(reticleMesh(s.reticle, s, ref));
+      }
     }
     // откидные механические при наличии оптики
     const hasOptic = !!asm.info('optic')?.sight;
@@ -150,8 +154,13 @@ export async function boot(def, lib) {
       sights.push({ id, label, eye, dir, up, mag: s.mag || 1, zoom: s.zoom, reticle: s.reticle, eyeRelief: s.eyeRelief, magnifier: s.magnifier, x0: eye.x });
     };
     const opt = asm.installed.get('optic');
-    if (opt?.info?.sight) push('optic', opt.part.name, opt.obj, opt.info.sight);
-    for (const it of asm.installed.values()) if (it.slot.id !== 'optic' && it.info?.sight && !it.info.sight.magnifier) push(it.slot.id, it.part.name, it.obj, it.info.sight);
+    // дополнительные прицелы модуля (напр. RMR на ACOG) идут сразу за основным
+    const pushAll = (id, it) => {
+      if (it.info?.sight && !it.info.sight.magnifier) push(id, it.part.name, it.obj, it.info.sight);
+      (it.info?.sights || []).forEach((s, i) => push(id + ':' + i, s.label || it.part.name, it.obj, s));
+    };
+    if (opt) pushAll('optic', opt);
+    for (const it of asm.installed.values()) if (it.slot.id !== 'optic') pushAll(it.slot.id, it);
     const mg = asm.installed.get('magnifier');
     if (mg?.info?.sight && sights[0]) {
       m.copy(toRoot(mg.obj, gun));
@@ -253,7 +262,10 @@ export async function boot(def, lib) {
     const mzInfo = asm.info('muzzle')?.muzzle;
     const kind = mzInfo ? mzInfo.kind : 'bare';
     const pos = muzzleWorld(new THREE.Vector3(), tmp2);
-    fx.muzzleFlash(pos, tmp2.clone(), kind, def.cal === '762x51' ? 1.3 : def.cal === '762x39' ? 1.15 : 1);
+    gun.getWorldQuaternion(tq);
+    const coldCan = kind === 'supp' && now - (st.prevShot ?? -10) > 3;
+    st.prevShot = now;
+    fx.muzzleFlash(pos, tmp2.clone(), kind, def.cal === '762x51' ? 1.3 : def.cal === '762x39' ? 1.15 : 1, tq, { flash: mzInfo ? mzInfo.flash ?? 0.8 : 1, first: coldCan });
     // пуля: разброс = кучность + разброс от отдачи в очереди
     const spreadMoa = (st.stats.moa || 1.5) + Math.min(st.burst, 10) * 0.7 * (st.stats.recoilV || 100) / 100 + (st.ads ? 0 : 60);
     const sp = spreadMoa / 60 * D2R * 0.5;
@@ -558,7 +570,15 @@ export async function boot(def, lib) {
       obj = mid && asm.mounts.get(mid);
     }
     if (!obj) { focusTarget.copy(homeTarget); focusDist = null; return; }
-    const box = new THREE.Box3().setFromObject(obj);
+    // сетки прицелов вынесены «в бесконечность» (десятки метров) — в рамку не входят,
+    // иначе камера улетает за стрельбище
+    const box = new THREE.Box3(), mb = new THREE.Box3();
+    obj.updateWorldMatrix(true, true);
+    obj.traverse((o) => {
+      if (!o.isMesh || o.userData.reticle || !o.geometry) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      box.union(mb.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld));
+    });
     if (box.isEmpty()) obj.getWorldPosition(focusTarget); else box.getCenter(focusTarget);
     focusDist = 0.55;
   }

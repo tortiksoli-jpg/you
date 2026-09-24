@@ -6,6 +6,7 @@ import * as THREE from 'three';
 const R = {
   dot: { field: 16, color: '#ff2a1a' },
   holo: { field: 96, color: '#ff2a1a' },
+  cdot: { field: 90, color: '#ff2a1a' },
   kobra: { field: 60, color: '#ff2a1a' },
   chevron: { field: 60, color: '#ff3a20' },
   lpvo: { field: 140, color: '#ff2a1a' },
@@ -24,6 +25,13 @@ function draw(kind, g, s, col) {
       g.lineWidth = 1.4 * u;
       g.beginPath(); g.arc(c, c, 34 * u, 0, 7); g.stroke();
       for (const a of [0, 90, 180, 270]) { const r = a * Math.PI / 180; g.beginPath(); g.moveTo(c + Math.cos(r) * 34 * u, c + Math.sin(r) * 34 * u); g.lineTo(c + Math.cos(r) * 29 * u, c + Math.sin(r) * 29 * u); g.stroke(); }
+      g.beginPath(); g.arc(c, c, 1.3 * u, 0, 7); g.fill();
+    }, 1.5 * u);
+  } else if (kind === 'cdot') {
+    // Holosun: кольцо 65 MOA + точка 2 MOA
+    glow(() => {
+      g.lineWidth = 1.3 * u;
+      g.beginPath(); g.arc(c, c, 32.5 * u, 0, 7); g.stroke();
       g.beginPath(); g.arc(c, c, 1.3 * u, 0, 7); g.fill();
     }, 1.5 * u);
   } else if (kind === 'kobra') {
@@ -77,7 +85,7 @@ export function reticleTexture(kind) {
 export function reticleMesh(kind, sight, ref, dist = 60000) {
   const field = R[kind]?.field || 16;
   // визуальное увеличение точки: 2 MOA на экране почти не видно
-  const boost = kind === 'dot' ? 3.4 : kind === 'holo' || kind === 'kobra' ? 1.25 : 1;
+  const boost = kind === 'dot' ? 3.4 : kind === 'holo' || kind === 'kobra' || kind === 'cdot' ? 1.25 : 1;
   const size = field * 0.2909 * (dist / 1000) * boost;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({
     map: reticleTexture(kind), transparent: true, depthTest: false, depthWrite: false, toneMapped: false,
@@ -121,6 +129,7 @@ export function reticleSVG(kind, zoom = 1) {
       <line x1="-170" y1="120" x2="-70" y2="120" stroke="${blk}" stroke-width="1.4"/><path d="${curve}" stroke="${blk}" stroke-width="1.4" fill="none"/>
       ${[2, 4, 6, 8, 10].map((n, i) => `<text x="${-168 + i * 22}" y="136" font-size="10" fill="${blk}">${n}</text>`).join('')}</svg>`;
   }
+  if (kind === 'cdot') return `<svg viewBox="-200 -200 400 400"><defs>${glow}</defs><circle r="${65 * zoom}" fill="none" stroke="${red}" stroke-width="2.4" filter="url(#gl)"/><circle r="${2.2 * zoom}" fill="${red}" filter="url(#gl)"/></svg>`;
   if (kind === 'holo') return `<svg viewBox="-200 -200 400 400"><defs>${glow}</defs><circle r="${68 * zoom}" fill="none" stroke="${red}" stroke-width="2.6" filter="url(#gl)"/><circle r="${2.2 * zoom}" fill="${red}" filter="url(#gl)"/></svg>`;
   if (kind === 'kobra') return `<svg viewBox="-200 -200 400 400"><defs>${glow}</defs><path d="M${-24 * zoom} ${16 * zoom} L0 ${2 * zoom} L${24 * zoom} ${16 * zoom}" stroke="${red}" stroke-width="2.6" fill="none" filter="url(#gl)"/><circle cy="${-6 * zoom}" r="${2.4 * zoom}" fill="${red}" filter="url(#gl)"/></svg>`;
   return `<svg viewBox="-200 -200 400 400"><defs>${glow}</defs><circle r="${Math.max(2.4, 3 * zoom)}" fill="${red}" filter="url(#gl)"/></svg>`;

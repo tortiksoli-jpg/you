@@ -132,8 +132,8 @@ function hkFlashHider(ctx) {
 function stockHkSlim(ctx) {
   const { G } = ctx;
   const k = ctx.kit();
-  const pro = [[152, -16, 3], [152, 16, 4], [88, 24, 30], [-10, 25, 6], [-10, -94, 8], [116, -20, 24]];
-  k.add('poly', G.extrudeZ(pro, 38, { bevel: 5, curve: 8 }));
+  // скруглённый корпус: верх — прямая щека, низ — скос к пятке
+  k.add('poly', G.sideLoft([[-10, 25], [40, 25], [88, 24], [130, 21], [152, 16]], [[-10, -94], [4, -86], [60, -52], [116, -22], [152, -16]], { w: 38, k: 3.6, width: (t) => 0.9 + 0.1 * t, rings: 28 }));
   // боковые выборки
   const pan = G.shape([[96, -26, 5], [36, -24, 6], [2, -74, 6], [2, -30, 5]]);
   for (const s of [-1, 1]) k.add('polySoft', G.extrudeZ(pan, 1.2, { bevel: 0.4, z: s * 18.6 }));
@@ -153,9 +153,11 @@ function stockCTR(ctx) {
   const { G } = ctx;
   const k = ctx.kit();
   // корпус CTR: труба-обойма, клиновидная щека, открытая нижняя часть
-  const pro = G.shape([[150, -17, 3], [150, 17, 4], [118, 20, 6], [36, 22, 8], [-8, 24, 4], [-8, -92, 5], [8, -92, 4], [100, -21, 10]],
-    [[[92, -26, 3], [30, -26, 4], [8, -74, 4], [8, -30, 3]]]);
-  k.add('poly', G.extrudeZ(pro, 36, { bevel: 3.5 }));
+  // щека над трубой, вертикальная стойка затыльника и нижняя диагональная «нога» —
+  // между ними сквозное треугольное окно, как у настоящего CTR
+  k.add('poly', G.sideLoft([[-8, 24], [36, 22.5], [118, 20], [150, 17]], [[-8, -24], [30, -24], [92, -22], [150, -17]], { w: 36, k: 3.4, rings: 24 }));
+  k.add('poly', G.extrudeZ([[-8, 20, 3], [10, 20, 3], [10, -92, 4], [-8, -92, 4]], 34, { bevel: 4, curve: 6 }));
+  k.add('poly', G.extrudeZ([[2, -92, 3], [16, -92, 3], [106, -24, 5], [88, -18, 5], [2, -76, 4]], 28, { bevel: 4, curve: 6 }));
   k.add('poly', G.T(G.cylX(19, 60, 150, { c: 3, seg: 28 }), { p: [0, 0, 0] }));
   // фрикционный фиксатор
   k.add('poly', G.extrudeZ([[96, -18, 2], [144, -18, 2], [144, -30, 3], [100, -28, 3]], 20, { bevel: 2 }));
@@ -205,11 +207,11 @@ function stanag(ctx, o) {
   const { G } = ctx;
   const k = ctx.kit(), rk = ctx.kit();
   const len = o.len, depth = 62, W = 23;
-  const { pts, off } = stanagProfile(len, depth, o.curve ?? 14);
+  const { pts, off } = stanagProfile(len, depth, o.curve ?? 22);
   k.add(o.mat, G.extrudeZ(pts.map((p) => [p[0], p[1], 0]), W, { bevel: o.bevel ?? 1.2 }));
   if (o.ribs) {
     // выштамповки на боковинах
-    const inner = stanagProfile(len - 18, depth - 18, (o.curve ?? 14) * 0.9, 30).pts;
+    const inner = stanagProfile(len - 18, depth - 18, (o.curve ?? 22) * 0.9, 30).pts;
     for (const s of [-1, 1]) k.add(o.mat, G.extrudeZ(inner.map((p) => [p[0], p[1] - 8, 0]), 1, { bevel: 0.4, z: s * (W / 2 + 0.2) }));
   }
   if (o.texture) {

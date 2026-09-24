@@ -48,7 +48,8 @@ export default {
   build(ctx) -> { root, sight?, light?, laser?, muzzle?, mag?, bipod?, flip? } }
 ```
 
-`sight`: `{ y, z, x0, x1, r, mag, zoom?: [1,6], reticle, eyeRelief, lens: Mesh }` — ось в локальных мм модуля.
+`sight`: `{ y, z, x0, x1, r, mag, zoom?: [1,6], reticle, eyeRelief, lens: Mesh, node? }` — ось в локальных мм модуля (или узла `node`).
+`sights`: `[{ label, ...как sight }]` — дополнительные прицелы модуля (RMR на ACOG), переключаются V.
 `muzzle`: `{ x, kind: 'fh'|'brake'|'comp'|'supp'|'bare', flash: 0..1 }`.
 `light`: `{ p, lens: Mesh }`, `laser`: `{ p, lens: Mesh }`.
 `mag`: `{ cap, rounds: Group }`.
@@ -78,11 +79,12 @@ URL-параметры: `?view=right|left|top|front|back|iso|isoL|under&zoom=2&a
 
 ## Общая библиотека (src/engine/lib) — идентификаторы
 
-Оптика на Пикатинни (`cat: 'optic'`): `t2_low` (ось 20 мм над планкой), `t2_lrp` (39 мм), `exps3` (39 мм),
+Оптика на Пикатинни (`cat: 'optic'`): `t2_low` (ось 20 мм над планкой), `t2_lrp` (39 мм), `exps3` (39 мм), `compm4`, `mro`,
+`rmr_riser` (39 мм), `hs510c`, `xps2` (36 мм), `pk120` (40 мм); на «ласточкин хвост» АК: `okp7d`;
 `acog` (4×, ось 38 мм), `lpvo` (1–6×, ось 40 мм). Увеличитель: `mag3x` (ось 39 мм).
 Складные целик/мушка: `mbus_rear`, `mbus_front` (линия прицеливания 35,5 мм над планкой).
 Дульные: `sf_socom556`, `a2_fh`, `warcomp556`, `pa_brake556` (резьба `1/2x28`), `sf_socom762`, `warcomp762`,
-`pa_brake762` (`5/8x24`).
+`pa_brake762` (`5/8x24`); только HK416: `bt_rotex_hk`, `kac_nt4`.
 Фонари `cat:'light'`: `m600`, `m300`. ЛЦУ `cat:'laser'`: `peq15`, `ls321`.
 Рукоятки `cat:'foregrip'`: `rvg`, `bcm_vg`, `afg2`, `handstop`. Сошки `cat:'bipod'`: `harris`.
 Пистолетные рукояти `cat:'pgrip'`, `fit.iface: ['ar']`: `hk_v2`, `moe_grip`, `bcm_mod3`.

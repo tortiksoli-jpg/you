@@ -439,3 +439,72 @@ export function superEllipse(a, b, k = 3, n = 32, cy = 0, cz = 0) {
   }
   return out;
 }
+
+// Лофт вдоль Y: rings = [{y, pts:[[x,z],...]}] (одинаковое число точек, обход против часовой, вид сверху).
+export function loftY(rings, o = {}) {
+  const r2 = rings.map((r) => ({ x: r.y, pts: r.pts.map(([x, z]) => [z, x]) }));
+  // loftX строит в (x, y=pts[1], z=pts[0]); меняем оси местами: (x←y, y←x)
+  const g = loftX(r2, o);
+  const p = g.attributes.position, n = g.attributes.normal;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i); p.setXY(i, y, x);
+    const nx = n.getX(i), ny = n.getY(i); n.setXY(i, ny, nx);
+  }
+  return g;
+}
+
+// Рукоять из переднего и заднего контуров (точки [x, y], y убывает вниз):
+// скруглённое сечение, уже к передней грани (пальцы) и шире к ладони.
+export function gripLoft(front, back, o = {}) {
+  const at = (pts, y) => {
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
+      if ((y <= y0 && y >= y1) || (y >= y0 && y <= y1)) return x0 + (x1 - x0) * ((y - y0) / ((y1 - y0) || 1));
+    }
+    return y > pts[0][1] ? pts[0][0] : pts[pts.length - 1][0];
+  };
+  const yTop = Math.min(front[0][1], back[0][1]), yBot = Math.max(front[front.length - 1][1], back[back.length - 1][1]);
+  const N = o.rings ?? 18, M = o.seg ?? 28, W = (o.w ?? 30) / 2, k = o.k ?? 2.6, taper = o.taper ?? 0.28;
+  const rings = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, y = yTop + (yBot - yTop) * t;
+    const xf = at(front, y), xb = at(back, y);
+    const cx = (xf + xb) / 2, a = Math.abs(xf - xb) / 2;
+    const wk = o.width ? o.width(t) : 1;
+    // скругление торцов: у нижнего края сечение слегка сжимается
+    const end = i === N ? 0.9 : 1;
+    const pts = [];
+    for (let j = 0; j < M; j++) {
+      const th = (j / M) * Math.PI * 2, c = Math.cos(th), s = Math.sin(th);
+      const ex = Math.sign(c) * Math.pow(Math.abs(c), 2 / k), ez = Math.sign(s) * Math.pow(Math.abs(s), 2 / k);
+      const zk = 1 - taper * Math.max(0, c) ** 2;
+      pts.push([cx + a * ex * end, W * wk * zk * ez * end]);
+    }
+    rings.push({ y, pts });
+  }
+  return loftY(rings, { crease: o.crease ?? 60 });
+}
+
+// Тело по верхнему и нижнему контурам вдоль X (точки [x, y], x возрастает):
+// сечения — суперэллипсы, ширина W·width(t). Для прикладов, щёк, накладок.
+export function sideLoft(upper, lower, o = {}) {
+  const at = (pts, x) => {
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
+      if (x >= x0 && x <= x1) return y0 + (y1 - y0) * ((x - x0) / ((x1 - x0) || 1));
+    }
+    return x < pts[0][0] ? pts[0][1] : pts[pts.length - 1][1];
+  };
+  const x0 = Math.max(upper[0][0], lower[0][0]), x1 = Math.min(upper[upper.length - 1][0], lower[lower.length - 1][0]);
+  const N = o.rings ?? 24, M = o.seg ?? 32, W = (o.w ?? 30) / 2, k = o.k ?? 3.2;
+  const rings = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, x = x0 + (x1 - x0) * t;
+    const yu = at(upper, x), yl = at(lower, x);
+    const wk = o.width ? o.width(t) : 1;
+    const end = (i === 0 && o.round0) || (i === N && o.round1) ? 0.92 : 1;
+    rings.push({ x, pts: superEllipse(W * wk * end, Math.abs(yu - yl) / 2 * end, k, M, (yu + yl) / 2, 0) });
+  }
+  // кольца идут по возрастанию X — обход граней обратный, чем у лофтов «назад» от коробки
+  return loftX(rings, { crease: o.crease ?? 60, flip: true });
+}
