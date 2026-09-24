@@ -214,6 +214,12 @@ export class UI {
 
   hud() {
     const a = this.app, st = a.st;
+    // вызывается каждый кадр — трогаем DOM только при изменении состояния
+    const key = [st.mag, st.magIn, st.chambered, st.cap, st.mode, st.busy, st.holdOpen, st.ads, st.sightIdx, st.zoom.toFixed(2), st.magAside, st.light, st.laser, st.bipod, st.folded,
+      a.audio.muted, a.sights.length, a.sights[st.sightIdx]?.label, a.asm.installed.size].join('|');
+    if (key === this.hudKey && this.lastStats === st.stats && this.hudCfg === a.cfg) return;
+    this.hudKey = key; this.hudCfg = a.cfg;
+    this.vo = null;
     const n = (st.magIn ? st.mag : 0);
     const low = n + (st.chambered ? 1 : 0) <= Math.ceil(st.cap * 0.2);
     this.ammo.className = 'panel ammo' + (low ? ' low' : '');
@@ -277,6 +283,13 @@ export class UI {
 
   // Сдвиг центра кадра (px): середина между левой колонкой и меню.
   viewOffset() {
+    // чтение геометрии форсирует layout — кэшируем на 250 мс
+    const now = performance.now();
+    if (this.vo && now - this.vo.t < 250 && this.vo.w === innerWidth) return this.vo.v;
+    this.vo = { t: now, w: innerWidth, v: this.viewOffsetNow() };
+    return this.vo.v;
+  }
+  viewOffsetNow() {
     if (innerWidth <= 900 || document.body.classList.contains('noui')) return 0;
     const cr = this.card.getBoundingClientRect(), mr = this.mods.getBoundingClientRect();
     const l = cr.width ? cr.right : 0;

@@ -86,3 +86,16 @@ export function cartridge(k, cal, t) {
   k.add(c.steel ? 'steelCase' : 'brass', caseGeo(cal), t && { ...t });
   k.add('copper', bulletGeo(cal), t && { ...t });
 }
+
+// Подающие губки магазина: загнутые внутрь кромки над верхним патроном,
+// чтобы патрон в окне выброса лежал в магазине, а не «висел» сам по себе.
+// x0..x1 — от задней стенки вперёд, y — верх корпуса, hw — полуширина, rise — высота губок.
+export function feedLips(k, mat, x0, x1, y, hw, o = {}) {
+  const rise = o.rise ?? 4.5, t = o.t ?? 1.1, curl = o.curl ?? 2.8;
+  const sec = [[hw, y - 2], [hw, y + rise - 1.2], [hw - curl * 0.55, y + rise, 0.6], [hw - curl, y + rise - 0.6, 0.4], [hw - curl + 0.3, y + rise - 1.6], [hw - t - 0.4, y + rise - 1.4], [hw - t, y - 2]];
+  for (const s of [-1, 1]) {
+    k.add(mat, G.extrudeX(sec.map(([z, yy, r]) => [s * z, yy, r || 0]), x0, x1, { bevel: 0.3 }));
+  }
+  // задняя стенка за донцем верхнего патрона
+  k.add(mat, G.extrudeX([[-hw, y - 2], [hw, y - 2], [hw, y + 1.2], [-hw, y + 1.2]], x0, x0 + 1.6, { bevel: 0.3 }));
+}
