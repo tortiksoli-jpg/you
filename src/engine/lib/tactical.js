@@ -26,7 +26,7 @@ function scout(ctx, o) {
   le.renderOrder = 0;
   le.material.transparent = false;
   root.add(le);
-  return { root, light: { p: [L1 + 30, cy, 0], lens: le, lumens: o.lm } };
+  return { root, light: { p: [L1 + 30, cy, 0], lens: le, lumens: o.lm, beam: { lensR: (H - 3.3) / 1000, ...o.beam } } };
 }
 
 /* ---------------------------------------------------------------- ЛЦУ */
@@ -59,7 +59,7 @@ function boxLaser(ctx, o) {
   const ll = lens(ctx, G.cylX(2.9, vis[0] + 1.2, vis[0] + 1.8, { seg: 16 }).translate(0, vis[1], vis[2]), 'laserLens');
   ll.renderOrder = 0; ll.material.transparent = false;
   root.add(ll);
-  return { root, laser: { p: [vis[0] + 2, vis[1], vis[2]], lens: ll } };
+  return { root, laser: { p: [vis[0] + 2, vis[1], vis[2]], lens: ll, color: o.color } };
 }
 
 /* -------------------------------------------------------- рукоятки */
@@ -89,7 +89,11 @@ function dbal(ctx) {
   const ll = lens(ctx, G.cylX(2.4, L1 + 2.3, L1 + 2.8, { seg: 16 }).translate(0, vy, 3), 'laserLens');
   ll.renderOrder = 0; ll.material.transparent = false;
   root.add(le, ll);
-  return { root, light: { p: [L1 + 7, ly, 0], lens: le, lumens: 300 }, laser: { p: [L1 + 3, vy, 3], lens: ll } };
+  return {
+    root,
+    light: { p: [L1 + 7, ly, 0], lens: le, lumens: 300, beam: { candela: 4000, hot: 0.1, spill: 0.5, spillK: 0.06, ring: 0.03, tir: true, color: 0xf6f6ff, lensR: 0.0114 } },
+    laser: { p: [L1 + 3, vy, 3], lens: ll, color: 0xff2a1a },
+  };
 }
 
 function vgrip(ctx, o) {
@@ -161,12 +165,12 @@ function harris(ctx) {
 }
 
 export const TACTICAL = [
-  { id: 'm600', cat: 'light', name: 'SureFire M600 Scout', desc: 'Тактический фонарь 1000 лм', foot: [-13, 13], body: [-78, 72], stats: { weight: 175, ergo: -2 }, build: (c) => scout(c, { name: 'm600', r: 12.7, headR: 15.9, tail: -76, head: 42, lm: 1000 }) },
-  { id: 'm300', cat: 'light', name: 'SureFire M300 Mini Scout', desc: 'Компактный фонарь 500 лм', foot: [-13, 13], body: [-60, 44], stats: { weight: 120, ergo: -1 }, build: (c) => scout(c, { name: 'm300', r: 11, headR: 12.6, tail: -58, head: 14, lm: 500 }) },
-  { id: 'peq15', cat: 'laser', name: 'L3 AN/PEQ-15', desc: 'ЛЦУ: видимый + ИК лазер, ИК-осветитель', foot: [-18, 18], body: [-48, 60], stats: { weight: 215, ergo: -3, 'hipSpread%': -18 }, build: (c) => boxLaser(c, { name: 'peq15', L0: -48, L1: 56, H: 38, W: 50, mat: 'polyTan', illum: 8 }) },
-  { id: 'ls321', cat: 'laser', name: 'Holosun LS321', desc: 'Компактный ЛЦУ с ИК-осветителем', foot: [-18, 18], body: [-34, 46], stats: { weight: 140, ergo: -2, 'hipSpread%': -15 }, build: (c) => boxLaser(c, { name: 'ls321', L0: -34, L1: 44, H: 32, W: 36, mat: 'poly', illum: 6 }) },
+  { id: 'm600', cat: 'light', name: 'SureFire M600 Scout', desc: 'Тактический фонарь 1000 лм', foot: [-13, 13], body: [-78, 72], stats: { weight: 175, ergo: -2 }, power: { light: 20, cells: '2 × CR123A', driver: 'reg' }, build: (c) => scout(c, { name: 'm600', r: 12.7, headR: 15.9, tail: -76, head: 42, lm: 1000, beam: { candela: 20000, hot: 0.07, spill: 0.55, spillK: 0.03, ring: 0.06, color: 0xf2f5ff } }) },
+  { id: 'm300', cat: 'light', name: 'SureFire M300 Mini Scout', desc: 'Компактный фонарь 500 лм', foot: [-13, 13], body: [-60, 44], stats: { weight: 120, ergo: -1 }, power: { light: 24, cells: '1 × CR123A', driver: 'reg' }, build: (c) => scout(c, { name: 'm300', r: 11, headR: 12.6, tail: -58, head: 14, lm: 500, beam: { candela: 7000, hot: 0.085, spill: 0.6, spillK: 0.045, ring: 0.05, color: 0xf2f5ff } }) },
+  { id: 'peq15', cat: 'laser', name: 'L3 AN/PEQ-15', desc: 'ЛЦУ: видимый + ИК лазер, ИК-осветитель', foot: [-18, 18], body: [-48, 60], stats: { weight: 215, ergo: -3, 'hipSpread%': -18 }, power: { laser: 30, cells: '1 × CR123A' }, build: (c) => boxLaser(c, { name: 'peq15', L0: -48, L1: 56, H: 38, W: 50, mat: 'polyTan', illum: 8, color: 0xff2a1a }) },
+  { id: 'ls321', cat: 'laser', name: 'Holosun LS321', desc: 'Компактный ЛЦУ: зелёный видимый + ИК лазер, ИК-осветитель', foot: [-18, 18], body: [-34, 46], stats: { weight: 140, ergo: -2, 'hipSpread%': -15 }, power: { laser: 26, cells: '1 × CR123A' }, build: (c) => boxLaser(c, { name: 'ls321', L0: -34, L1: 44, H: 32, W: 36, mat: 'poly', illum: 6, color: 0x3dff5a }) },
 
-  { id: 'dbal', cat: 'combo', name: 'Steiner DBAL-PL', desc: 'Комбо-блок: фонарь 300 лм + видимый лазер (C / Z)', foot: [-16, 16], body: [-42, 44], stats: { weight: 150, ergo: -2, 'hipSpread%': -12 }, build: dbal },
+  { id: 'dbal', cat: 'combo', name: 'Steiner DBAL-PL', desc: 'Комбо-блок: фонарь 300 лм + видимый лазер (C / Z)', foot: [-16, 16], body: [-42, 44], stats: { weight: 150, ergo: -2, 'hipSpread%': -12 }, power: { light: 26, laser: 30, cells: '1 × CR123A', driver: 'reg' }, build: dbal },
   { id: 'rvg', cat: 'foregrip', name: 'Magpul RVG', desc: 'Вертикальная рукоятка, контроль отдачи', foot: [-17, 17], body: [-17, 17], stats: { weight: 70, 'recoilV%': -6, 'recoilH%': -10, ergo: 3, adsTime: 6 }, build: (c) => vgrip(c, { name: 'rvg', len: 98, d: 32, ribs: true }) },
   { id: 'bcm_vg', cat: 'foregrip', name: 'BCM Gunfighter Mod 3', desc: 'Короткая рукоятка-упор', foot: [-16, 16], body: [-16, 16], stats: { weight: 45, 'recoilV%': -4, 'recoilH%': -6, ergo: 5 }, build: (c) => vgrip(c, { name: 'bcm', len: 62, d: 31, flat: 0.85 }) },
   { id: 'afg2', cat: 'foregrip', name: 'Magpul AFG-2', desc: 'Наклонная рукоятка, быстрая вскидка', foot: [-64, 34], body: [-66, 34], stats: { weight: 55, 'recoilV%': -3, 'recoilH%': -5, ergo: 6, adsTime: -8 }, build: afg },

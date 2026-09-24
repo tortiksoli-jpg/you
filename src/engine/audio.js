@@ -1,7 +1,8 @@
 // Процедурный звук: выстрел собирается из слоёв (дульная волна, «тело»,
-// баллистический щелчок пули, механика автоматики, эхо стрельбища).
-// Дульное устройство меняет каждый слой: глушитель срезает дульную волну
-// на ~25 дБ и верх спектра, тормоз делает выстрел громче и резче.
+// баллистический щелчок пули, механика автоматики) и акустики закрытого тира.
+// Дульное устройство меняет каждый слой: тормоз делает выстрел громче и резче,
+// глушитель — отдельная модель: приглушённый хлопок, звон корпуса, шипение газов,
+// газы из окна выброса; щелчок сверхзвуковой пули глушитель не убирает.
 
 import { Foley } from './foley.js';
 
@@ -44,7 +45,7 @@ export class GunAudio {
     this.dry = c.createGain();
     this.dry.connect(this.master);
     this.verb = c.createConvolver();
-    this.verb.buffer = this.impulse(2.6);
+    this.verb.buffer = this.impulse(2.2);
     this.wet = c.createGain();
     this.wet.gain.value = 0.55;
     this.verb.connect(this.wet).connect(this.master);
@@ -87,24 +88,32 @@ export class GunAudio {
     return b;
   }
 
-  // Импульсная характеристика открытого стрельбища: плотный хвост + отражения от валов.
+  // Импульсная характеристика закрытого тира: ранние отражения от перегородок кабинки,
+  // пола и козырьков, порхающее эхо между параллельными стенами (12 м → 35 мс),
+  // диффузный хвост RT60 ≈ 1,3 с, темнеющий со временем, и слабый отклик пулеулавливателя.
   impulse(sec) {
-    const c = this.ctx, n = Math.floor(c.sampleRate * sec);
-    const b = c.createBuffer(2, n, c.sampleRate);
-    const refl = [[0.045, 0.5], [0.11, 0.35], [0.19, 0.3], [0.31, 0.42], [0.52, 0.22], [0.78, 0.16]];
+    const c = this.ctx, sr = c.sampleRate, n = Math.floor(sr * sec);
+    const b = c.createBuffer(2, n, sr);
+    const early = [[0.0065, 0.55], [0.008, 0.5], [0.0125, 0.42], [0.021, 0.3], [0.028, 0.33], [0.035, 0.36], [0.047, 0.22], [0.063, 0.2], [0.082, 0.16]];
     for (let ch = 0; ch < 2; ch++) {
       const d = b.getChannelData(ch);
       let lp = 0;
       for (let i = 0; i < n; i++) {
-        const t = i / c.sampleRate;
+        const t = i / sr;
         const w = Math.random() * 2 - 1;
-        lp += (w - lp) * (0.35 - Math.min(0.3, t * 0.14));
-        d[i] = lp * Math.pow(1 - t / sec, 3.2) * 0.35;
+        lp += (w - lp) * (0.5 - Math.min(0.42, t * 0.32));
+        const onset = Math.min(1, t / 0.02);
+        d[i] = lp * Math.exp(-6.9 * t / 1.3) * 0.3 * onset;
       }
-      for (const [t, a] of refl) {
-        const s = Math.floor((t + (ch ? 0.007 : 0)) * c.sampleRate);
-        for (let j = 0; j < 900 && s + j < n; j++) d[s + j] += (Math.random() * 2 - 1) * a * Math.exp(-j / 180);
-      }
+      const tap = (t, a, len = 360) => {
+        const s0 = Math.floor(t * sr);
+        let f = 0;
+        for (let j = 0; j < len && s0 + j < n; j++) { f += ((Math.random() * 2 - 1) - f) * 0.6; d[s0 + j] += f * a * Math.exp(-j / (len * 0.22)); }
+      };
+      for (const [t, a] of early) tap(t + (ch ? 0.0011 : 0) + Math.random() * 0.0008, a);
+      // порхающее эхо между боковыми стенами
+      for (let k = 1; k < 18; k++) tap(0.035 * k + (ch ? 0.0006 : 0), 0.34 * Math.pow(0.8, k), 280);
+      tap(0.62 + (ch ? 0.004 : 0), 0.07, 900);
     }
     return b;
   }
@@ -142,6 +151,7 @@ export class GunAudio {
     const frp = this.muzzle === 'supp' && t - this.lastShot > 3 ? 1.9 : 1;
     this.lastShot = t;
     const L = P.level * v;
+    if (this.muzzle === 'supp') { this.shotSupp(t, P, L, v, frp > 1); return; }
 
     // 1) дульная волна
     {
@@ -195,14 +205,80 @@ export class GunAudio {
       const mech = (this.profile.mech ?? 0.8) * (this.muzzle === 'supp' ? 1.3 : 1);
       this.play('cycle', { gain: 0.32 * mech, delay: 0.004, wet: 0.05, pan: 0.15 });
     }
-    // 5) эхо от вала — поздний приглушённый повтор
-    if (this.muzzle !== 'supp') {
-      const s = this.src(this.pink, t + 0.34, 0.25);
-      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
-      const g = c.createGain(); this.env(g, t + 0.34, 0.01, 0.14 * L * M.wet, 0.09, 0.3);
-      s.connect(lp).connect(g);
-      this.out(g, 0.6, -0.2);
+    // 5) хлопок от пулеулавливателя в конце зала (~0,6 с) — уже в импульсе зала
+  }
+
+  // Выстрел с глушителем. voice: длина корпуса (мм) и снижение громкости (дБ).
+  // Слои: приглушённый хлопок с мягкой атакой, «первый выстрел» (кислород в холодной
+  // банке догорает — глухой удар), звон тонкостенного корпуса и перегородок,
+  // шипение газов из торца, газы из окна выброса (у АК и SCAR — сильнее, в лицо),
+  // щелчок пули и механика — теперь они главные в звуке.
+  shotSupp(t, P, L, v, first) {
+    const c = this.ctx;
+    const V = this.voice || { len: 170, loud: -27 };
+    const k = Math.pow(10, ((V.loud ?? -27) + 27) / 20);
+    const fam = this.profile.family;
+    // 1) хлопок
+    {
+      const s = this.src(this.noise, t, 0.4, 0.9 + Math.random() * 0.2);
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass';
+      const f0 = Math.min(3200, P.blastF * 0.38);
+      lp.frequency.setValueAtTime(f0, t);
+      lp.frequency.exponentialRampToValueAtTime(320, t + 0.05);
+      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 70;
+      const g = c.createGain(); this.env(g, t, 0.0022, 0.4 * L * k * (first ? 2.2 : 1), 0.022, 0.4);
+      s.connect(lp).connect(hp).connect(g);
+      this.out(g, 0.35);
+      const osc = c.createOscillator();
+      const f = P.bodyF * 0.72 * (0.95 + Math.random() * 0.1);
+      osc.frequency.setValueAtTime(f, t); osc.frequency.exponentialRampToValueAtTime(f * 0.4, t + 0.08);
+      const g2 = c.createGain(); this.env(g2, t, 0.003, 0.22 * L * P.body * (first ? 1.9 : 1), 0.035, 0.25);
+      osc.connect(g2); this.out(g2, 0.2);
+      osc.start(t); osc.stop(t + 0.26);
     }
+    if (first) {
+      const s = this.src(this.pink, t + 0.002, 0.35);
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520;
+      const g = c.createGain(); this.env(g, t + 0.002, 0.004, 0.9 * L * P.body, 0.06, 0.35);
+      s.connect(lp).connect(g); this.out(g, 0.45);
+    }
+    // 2) звон корпуса: моды трубки обратно пропорциональны длине, быстро гаснут в руках
+    {
+      const f0 = 1450 * 170 / Math.max(90, V.len || 170);
+      for (const [m, a, tau] of [[1, 1, 0.05], [2.76, 0.55, 0.032], [5.4, 0.3, 0.02], [8.9, 0.16, 0.012]]) {
+        const o = c.createOscillator();
+        o.frequency.value = f0 * m * (0.97 + Math.random() * 0.06);
+        const g = c.createGain(); this.env(g, t + 0.001, 0.0008, 0.035 * L * a, tau, 0.25);
+        o.connect(g); this.out(g, 0.15, 0.05);
+        o.start(t); o.stop(t + 0.26);
+      }
+    }
+    // 3) шипение газов из торца
+    {
+      const s = this.src(this.noise, t + 0.003, 0.3);
+      const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2100; bp.Q.value = 0.7;
+      const g = c.createGain(); this.env(g, t + 0.003, 0.004, 0.16 * L * k, 0.045, 0.3);
+      s.connect(bp).connect(g); this.out(g, 0.2);
+    }
+    // 4) газы из окна выброса у лица стрелка
+    {
+      const pg = fam === 'ak' ? 0.28 : fam === 'scar' ? 0.24 : 0.14;
+      const s = this.src(this.pink, t + 0.005, 0.2);
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1600;
+      const g = c.createGain(); this.env(g, t + 0.005, 0.0015, pg * L, 0.028, 0.2);
+      s.connect(lp).connect(g); this.out(g, 0.15, 0.2);
+    }
+    // 5) щелчок сверхзвуковой пули — глушитель его не убирает
+    {
+      const s = c.createBufferSource(); s.buffer = this.crackBuf;
+      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1800;
+      const g = c.createGain(); g.gain.value = 0.5 * P.crack * v;
+      s.connect(hp).connect(g);
+      this.out(g, 0.55);
+      s.start(t + 0.002);
+    }
+    // 6) механика автоматики
+    this.play('cycle', { gain: 0.38 * (this.profile.mech ?? 0.8), delay: 0.004, wet: 0.08, pan: 0.15 });
   }
 
   // Механика и перезарядка — синтезированные буферы (foley.js): без тональных «звонов».
@@ -212,7 +288,7 @@ export class GunAudio {
     if (!this.foley) this.foley = new Foley(c);
     const P = this.profile;
     const s = c.createBufferSource();
-    s.buffer = this.foley.buffer(name, { fam: P.family, cal: P.cal, kind: o.kind, rpm: name === 'cycle' ? P.rpm : undefined });
+    s.buffer = this.foley.buffer(name, { fam: P.family, cal: P.cal, kind: o.kind, fill: o.fill, rpm: name === 'cycle' ? P.rpm : undefined });
     s.playbackRate.value = 0.96 + Math.random() * 0.08;
     const g = c.createGain(); g.gain.value = (o.gain ?? 1) * 0.9;
     s.connect(g);
@@ -223,10 +299,13 @@ export class GunAudio {
   dryFire() { this.play('dryFire', { gain: 0.7 }); }
   selector() { this.play('selector', { gain: 0.8 }); }
   click() { this.play('click', { gain: 0.6, pan: 0 }); }
-  magOut(kind = 'steel') { this.play('magOut', { kind, gain: 0.95 }); }
+  magOut(kind = 'steel', fill = 2) { this.play('magOut', { kind, fill, gain: 0.95 }); }
+  pouch(kind = 'steel') { this.play('pouch', { kind, fill: 2, gain: 0.7, pan: 0.25 }); }
+  tug(kind = 'steel') { this.play('tug', { kind, gain: 0.6 }); }
+  shoulder(on) { this.play(on ? 'shoulder' : 'unshoulder', { gain: on ? 0.42 : 0.35, pan: 0 }); }
   magInsert(kind = 'steel') { this.play('magInsert', { kind, gain: 0.85 }); }
   magIn(kind = 'steel') { this.play('magIn', { kind, gain: 1.1 }); }
-  magDropGround(kind = 'steel') { this.play('magGround', { kind, gain: 0.7, pan: 0.3, wet: 0.12 }); }
+  magDropGround(kind = 'steel', fill = 2) { this.play('magGround', { kind, fill, gain: 0.75, pan: 0.3, wet: 0.2 }); }
   chargeBack() { this.play('chargeBack', { gain: 0.95 }); }
   chargeRelease() { this.play('chargeRelease', { gain: 1.05 }); }
   boltCatch() { this.play('boltCatch', { gain: 1.05 }); }
@@ -287,5 +366,48 @@ export class GunAudio {
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500;
     const g = c.createGain(); this.env(g, t, 0.003, 0.25 * a, 0.05, 0.2);
     s.connect(lp).connect(g); this.out(g, 0.3);
+  }
+
+  // Попадание по поверхности тира: бетон — сухой щелчок с крошкой, дерево — глухой тук,
+  // стальной пулеулавливатель — короткий звон ламелей.
+  impact(surf, dist) {
+    if (!this.ctx || this.muted) return;
+    if (surf === 'trap') { this.ding(dist, 0.3); this.thump(dist); return; }
+    const c = this.ctx, t = c.currentTime + dist / 343;
+    const a = Math.min(1, 10 / Math.max(5, dist));
+    const s = this.src(this.noise, t, 0.12);
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.value = surf === 'wood' ? 700 : surf === 'panel' ? 1800 : 2400; bp.Q.value = 0.9;
+    const g = c.createGain(); this.env(g, t, 0.001, 0.3 * a, surf === 'wood' ? 0.03 : 0.018, 0.14);
+    s.connect(bp).connect(g); this.out(g, 0.35);
+    this.thump(dist);
+  }
+
+  // Кнопка фонаря на торцевой крышке: мягкий нажим и щелчок фиксации.
+  tailcap(on) {
+    this.play('tick', { kind: 'poly', gain: 0.35, pan: 0.1 });
+    this.play('click', { gain: on ? 0.55 : 0.45, delay: 0.012, pan: 0.1 });
+  }
+
+  // Рубильник освещения тира — далёкий щелчок и эхо зала.
+  lightSwitch() {
+    if (!this.ctx || this.muted) return;
+    this.play('tick', { kind: 'steel', gain: 0.25, pan: -0.5, wet: 0.5 });
+    this.play('tick', { kind: 'steel', gain: 0.18, delay: 0.05, pan: -0.5, wet: 0.6 });
+  }
+
+  // Замена батарей: крышка откручивается (резьба), элементы выпадают в ладонь,
+  // новые вставляются, крышка закручивается до упора. Возвращает длительность, с.
+  batteryChange() {
+    const D = 3.1;
+    if (!this.ctx || this.muted) return D;
+    let t = 0;
+    for (let i = 0; i < 7; i++) { this.play('tick', { kind: 'steel', gain: 0.2 + Math.random() * 0.08, delay: t, pan: 0.2 }); t += 0.07 + Math.random() * 0.03; }
+    this.play('battCells', { delay: 0.85, gain: 0.3, pan: 0.15 });
+    this.play('battCells', { delay: 1.55, gain: 0.25, pan: 0.15 });
+    t = 2.05;
+    for (let i = 0; i < 7; i++) { this.play('tick', { kind: 'steel', gain: 0.2 + Math.random() * 0.08, delay: t, pan: 0.2 }); t += 0.07 + Math.random() * 0.03; }
+    this.play('tick', { kind: 'steel', gain: 0.5, delay: t + 0.05, pan: 0.2 });
+    return D;
   }
 }
