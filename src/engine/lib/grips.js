@@ -9,15 +9,14 @@ function grip(ctx, o) {
   const sh = (y) => -Math.tan(a) * -y; // смещение назад по высоте
   const front = o.front.map(([f, y]) => [sh(y) + f, y]);
   const back = o.back.map(([f, y]) => [sh(y) + f, y]);
-  const pts = [...front.map((p) => [...p, 3]), ...back.reverse().map((p) => [...p, 4])];
-  pts[0][2] = 0; pts[pts.length - 1][2] = 0;
-  k.add(o.mat || 'poly', G.extrudeZ(pts, o.w ?? 30, { bevel: o.bevel ?? 6, curve: 6 }));
-  // зона текстуры по бокам
+  // скруглённое тело: сечение-«яйцо», шире у ладони, с поясом у верхней части
+  k.add(o.mat || 'poly', G.gripLoft(front, back, { w: o.w ?? 30, width: (t) => 0.86 + 0.14 * Math.sin(Math.PI * Math.min(1, t * 1.6)) }));
+  // зона насечки: тонкие рельефные полосы вдоль ладонной стороны
   if (o.texture !== false) {
     const tx = [];
-    for (let i = 0; i < 8; i++) {
-      const y = -22 - i * 9;
-      for (const s of [-1, 1]) tx.push(G.T(G.box(26, 1.4, 1, { bevel: 0.3 }), { p: [sh(y) - 18, y, s * ((o.w ?? 30) / 2 - 0.3)], r: [0, 0, 20] }));
+    for (let i = 0; i < 9; i++) {
+      const y = -24 - i * 8.5;
+      for (const s of [-1, 1]) tx.push(G.T(G.box(16, 1.1, 1.2, { bevel: 0.3 }), { p: [sh(y) - 22, y, s * ((o.w ?? 30) / 2 * 0.9 - 0.2)], r: [0, 0, o.angle ?? 20] }));
     }
     k.add(o.mat || 'poly', tx);
   }

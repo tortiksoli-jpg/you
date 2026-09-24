@@ -478,25 +478,26 @@ function makeTextures() {
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) brushed[y * S + x] = br[y * S + x * 7 % S] * 0.3 + br[y * 3 % S * S + x] * 0.7;
   const mix = new Float32Array(S * S);
   for (let i = 0; i < mix.length; i++) mix[i] = coarse[i] * 0.55 + fine[i] * 0.45;
-  const wood = (hue) => {
-    const n = fbm(S, 4, 301, 4), n2 = fbm(S, 3, 555, 16);
-    return toTex(S, (i) => {
-      const x = i % S, y = i / S | 0;
-      const v = y / S + n[i] * 0.35 + n2[i] * 0.04;
-      const ring = Math.pow(Math.abs(Math.sin(v * Math.PI * 9)), 6);
-      const fib = n2[y * S + x * 5 % S] * 0.25;
-      const k = 0.82 + fib * 0.6 - ring * 0.17 + (coarse[i] - 0.5) * 0.12;
-      return [hue[0] * k, hue[1] * k, hue[2] * k];
-    }, true);
-  };
-  const woodH = new Float32Array(S * S);
-  {
-    const n = fbm(S, 4, 301, 4);
-    for (let i = 0; i < S * S; i++) {
-      const y = (i / S | 0) / S;
-      woodH[i] = Math.pow(Math.abs(Math.sin((y + n[i] * 0.35) * Math.PI * 9)), 6);
+  const streak = (() => {
+    const n = fbm(S, 4, 555, 16), out = new Float32Array(S * S), R4 = 18;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      let a = 0;
+      for (let d = -R4; d <= R4; d++) a += n[y * S + (x + d + S) % S];
+      out[y * S + x] = a / (2 * R4 + 1);
     }
-  }
+    return out;
+  })();
+  const woodVal = (i) => {
+    const y = (i / S | 0) / S;
+    const ply = 0.5 + 0.5 * Math.sin((y + coarse[i] * 0.06) * Math.PI * 2 * 28);
+    return (streak[i] - 0.5) * 1.6 + (ply - 0.5) * 0.12 + (coarse[i] - 0.5) * 0.25;
+  };
+  const wood = (hue) => toTex(S, (i) => {
+    const k = 0.9 + woodVal(i) * 0.5;
+    return [hue[0] * k, hue[1] * k, hue[2] * k];
+  }, true);
+  const woodH = new Float32Array(S * S);
+  for (let i = 0; i < S * S; i++) woodH[i] = woodVal(i) * 0.5 + 0.5;
   return {
     rough: roughFrom(mix, S, 0.72, 1),
     roughStrong: roughFrom(coarse, S, 0.55, 1),
@@ -505,8 +506,8 @@ function makeTextures() {
     nCast: normalFrom(mix, S, 3.2),
     nPoly: normalFrom(stipple, S, 5.5),
     nWood: normalFrom(woodH, S, 1.6),
-    woodBirch: wood([150, 66, 36]),
-    woodWalnut: wood([120, 70, 40])
+    woodBirch: wood([100, 42, 24]),
+    woodWalnut: wood([92, 58, 36])
   };
 }
 function createMaterials(envMap) {
@@ -545,7 +546,7 @@ function createMaterials(envMap) {
   R4.chrome = metal(13224910, 0.14, 1);
   R4.alu = metal(2039842, 0.46, 0.55, { ns: 0.25 });
   R4.aluGrey = metal(3882304, 0.44, 0.6, { ns: 0.25 });
-  R4.aluFde = metal(9402968, 0.58, 0.25, { cast: true, ns: 0.35, env: 0.8 });
+  R4.aluFde = metal(7693130, 0.58, 0.25, { cast: true, ns: 0.35, env: 0.8 });
   R4.aluOd = metal(4999992, 0.6, 0.25, { cast: true });
   R4.cast = metal(2500393, 0.66, 0.55, { cast: true, ns: 0.7 });
   R4.brass = metal(13148240, 0.3, 1);
@@ -554,23 +555,23 @@ function createMaterials(envMap) {
   R4.spring = metal(4868942, 0.35, 0.9);
   R4.poly = poly(1776412, 0.74);
   R4.polySoft = poly(2105377, 0.86, { ns: 0.7 });
-  R4.polyFde = poly(9995359, 0.78);
-  R4.polyFdeDark = poly(7299144, 0.8);
+  R4.polyFde = poly(8350800, 0.78);
+  R4.polyFdeDark = poly(6049338, 0.8);
   R4.polyPlum = poly(4991522, 0.58, { ns: 0.3 });
   R4.polyOd = poly(4868662, 0.78);
   R4.polyGrey = poly(3948097, 0.7);
   R4.polyTan = poly(11573876, 0.78);
   R4.rubber = poly(1315860, 0.92, { ns: 0.9, tile: 14 });
-  R4.bakelite = std({ color: 8006672, roughness: 0.42, metalness: 0, normalMap: rep(tex2.nCast, 60), normalScale: new THREE2.Vector2(0.2, 0.2), roughnessMap: rep(tex2.rough, 60) });
+  R4.bakelite = std({ color: 4856846, roughness: 0.4, metalness: 0, normalMap: rep(tex2.nCast, 60), normalScale: new THREE2.Vector2(0.2, 0.2), roughnessMap: rep(tex2.rough, 60) });
   R4.wood = phys({
     color: 16777215,
     map: rep(tex2.woodBirch, 160),
     roughness: 0.52,
     metalness: 0,
     normalMap: rep(tex2.nWood, 160),
-    normalScale: new THREE2.Vector2(0.25, 0.25),
-    clearcoat: 0.35,
-    clearcoatRoughness: 0.4
+    normalScale: new THREE2.Vector2(0.15, 0.15),
+    clearcoat: 0.3,
+    clearcoatRoughness: 0.35
   });
   R4.woodDark = phys({
     color: 16777215,
@@ -652,8 +653,10 @@ __export(geo_exports, {
   extrudeY: () => extrudeY,
   extrudeZ: () => extrudeZ,
   flutesX: () => flutesX,
+  gripLoft: () => gripLoft,
   latheX: () => latheX,
   loftX: () => loftX,
+  loftY: () => loftY,
   merge: () => merge,
   mirrorZ: () => mirrorZ,
   mlokHoles: () => mlokHoles,
@@ -667,6 +670,7 @@ __export(geo_exports, {
   rrect: () => rrect,
   screwHead: () => screwHead,
   shape: () => shape,
+  sideLoft: () => sideLoft,
   slot: () => slot,
   sphere: () => sphere,
   spring: () => spring,
@@ -1110,6 +1114,66 @@ function superEllipse(a, b, k = 3, n = 32, cy = 0, cz = 0) {
   }
   return out;
 }
+function loftY(rings, o = {}) {
+  const r2 = rings.map((r) => ({ x: r.y, pts: r.pts.map(([x, z]) => [z, x]) }));
+  const g = loftX(r2, o);
+  const p = g.attributes.position, n = g.attributes.normal;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i);
+    p.setXY(i, y, x);
+    const nx = n.getX(i), ny = n.getY(i);
+    n.setXY(i, ny, nx);
+  }
+  return g;
+}
+function gripLoft(front, back, o = {}) {
+  const at = (pts, y) => {
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
+      if (y <= y0 && y >= y1 || y >= y0 && y <= y1) return x0 + (x1 - x0) * ((y - y0) / (y1 - y0 || 1));
+    }
+    return y > pts[0][1] ? pts[0][0] : pts[pts.length - 1][0];
+  };
+  const yTop = Math.min(front[0][1], back[0][1]), yBot = Math.max(front[front.length - 1][1], back[back.length - 1][1]);
+  const N = o.rings ?? 18, M = o.seg ?? 28, W = (o.w ?? 30) / 2, k = o.k ?? 2.6, taper = o.taper ?? 0.28;
+  const rings = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, y = yTop + (yBot - yTop) * t;
+    const xf = at(front, y), xb = at(back, y);
+    const cx = (xf + xb) / 2, a = Math.abs(xf - xb) / 2;
+    const wk = o.width ? o.width(t) : 1;
+    const end = i === N ? 0.9 : 1;
+    const pts = [];
+    for (let j = 0; j < M; j++) {
+      const th = j / M * Math.PI * 2, c = Math.cos(th), s = Math.sin(th);
+      const ex = Math.sign(c) * Math.pow(Math.abs(c), 2 / k), ez = Math.sign(s) * Math.pow(Math.abs(s), 2 / k);
+      const zk = 1 - taper * Math.max(0, c) ** 2;
+      pts.push([cx + a * ex * end, W * wk * zk * ez * end]);
+    }
+    rings.push({ y, pts });
+  }
+  return loftY(rings, { crease: o.crease ?? 60 });
+}
+function sideLoft(upper, lower, o = {}) {
+  const at = (pts, x) => {
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x02, y0] = pts[i], [x12, y1] = pts[i + 1];
+      if (x >= x02 && x <= x12) return y0 + (y1 - y0) * ((x - x02) / (x12 - x02 || 1));
+    }
+    return x < pts[0][0] ? pts[0][1] : pts[pts.length - 1][1];
+  };
+  const x0 = Math.max(upper[0][0], lower[0][0]), x1 = Math.min(upper[upper.length - 1][0], lower[lower.length - 1][0]);
+  const N = o.rings ?? 24, M = o.seg ?? 32, W = (o.w ?? 30) / 2, k = o.k ?? 3.2;
+  const rings = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, x = x0 + (x1 - x0) * t;
+    const yu = at(upper, x), yl = at(lower, x);
+    const wk = o.width ? o.width(t) : 1;
+    const end = i === 0 && o.round0 || i === N && o.round1 ? 0.92 : 1;
+    rings.push({ x, pts: superEllipse(W * wk * end, Math.abs(yu - yl) / 2 * end, k, M, (yu + yl) / 2, 0) });
+  }
+  return loftX(rings, { crease: o.crease ?? 60, flip: true });
+}
 
 // src/engine/lib/common.js
 var common_exports = {};
@@ -1486,6 +1550,8 @@ function makeCtx(mats) {
 }
 
 // src/engine/foley.js
+var R = Math.random;
+var jit = (v, k = 0.1) => v * (1 - k + R() * 2 * k);
 function biquad(d, sr, type, f, q = 0.707) {
   const w = 2 * Math.PI * Math.min(f, sr * 0.45) / sr, cw = Math.cos(w), sw = Math.sin(w), a = sw / (2 * q);
   let b0, b1, b2;
@@ -1514,172 +1580,282 @@ function biquad(d, sr, type, f, q = 0.707) {
   }
   return d;
 }
-var R = Math.random;
-var jit = (v, k = 0.08) => v * (1 - k + R() * 2 * k);
+var BODY = {
+  // фрезерованный алюминий ствольной коробки AR/SCAR: плотный, сухой
+  alu: { f0: 380, f1: 9e3, n: 48, tau: 7e-3, tilt: -0.25, decK: 0.75 },
+  // штампованная сталь АК: тонкий лист — ярче и чуть дольше
+  sheet: { f0: 450, f1: 9500, n: 56, tau: 0.011, tilt: -0.15, decK: 0.7 },
+  // массивные стальные детали (затворная рама, защёлка)
+  steel: { f0: 900, f1: 11e3, n: 40, tau: 4e-3, tilt: -0.1, decK: 0.8 },
+  // мелкая пружинная сталь (кнопка, защёлка, фиксатор)
+  small: { f0: 2200, f1: 13e3, n: 30, tau: 22e-4, tilt: 0, decK: 0.85 },
+  // полимерный магазин / накладки — глухо и коротко
+  poly: { f0: 250, f1: 5e3, n: 36, tau: 4e-3, tilt: -0.6, decK: 0.6 },
+  // стальной магазин — корпус из тонкого листа
+  magSteel: { f0: 500, f1: 8e3, n: 44, tau: 6e-3, tilt: -0.3, decK: 0.7 },
+  // латунь патронов в магазине
+  brass: { f0: 2500, f1: 12e3, n: 24, tau: 18e-4, tilt: -0.1, decK: 0.8 },
+  // бетон/земля при падении
+  ground: { f0: 150, f1: 3500, n: 30, tau: 4e-3, tilt: -0.8, decK: 0.5 }
+};
 var Track = class {
   constructor(sr, sec) {
     this.sr = sr;
     this.d = new Float32Array(Math.ceil(sr * sec));
   }
-  // удар: modes = [[f, затухание (с), амплитуда]], шум: {amp, decay, lp, hp, bp}
-  impact(t, level, modes, nz = {}) {
-    const sr = this.sr, d = this.d, i0 = Math.floor(t * sr);
-    for (const [f0, dec0, a0] of modes) {
-      const f = jit(f0, 0.06), dec = jit(dec0, 0.15), ph = R() * 6.28, w = 2 * Math.PI * f / sr;
-      const n = Math.min(d.length - i0, Math.ceil(dec * sr * 7));
-      const att = Math.max(2, sr * 3e-4);
-      for (let i = 0; i < n; i++) d[i0 + i] += level * a0 * Math.exp(-i / (dec * sr)) * Math.min(1, i / att) * Math.sin(w * i + ph);
+  // Банк резонаторов, возбуждаемых сигналом x (начиная с отсчёта i0).
+  resonate(x, i0, body, level, damp = 1) {
+    const sr = this.sr, d = this.d, B = BODY[body] || body;
+    const tail = Math.ceil(sr * Math.min(0.12, B.tau * 8 * damp));
+    const n = Math.min(d.length - i0, x.length + tail);
+    if (n <= 0) return;
+    const out = new Float32Array(n);
+    const lf0 = Math.log(B.f0), lf1 = Math.log(B.f1);
+    let norm = 0;
+    for (let m = 0; m < B.n; m++) {
+      const f = Math.exp(lf0 + (lf1 - lf0) * R());
+      const tau = B.tau * damp * Math.pow(f / 1e3, -B.decK) * (0.6 + R() * 0.8);
+      const r = Math.exp(-1 / (Math.max(4e-4, tau) * sr));
+      const w = 2 * Math.PI * f / sr;
+      const c1 = 2 * r * Math.cos(w), c2 = -r * r;
+      const g = (0.25 + R() * 0.75) * Math.pow(f / 1e3, B.tilt) * (1 - r) * 2;
+      norm += g;
+      let y1 = 0, y2 = 0;
+      for (let i = 0; i < n; i++) {
+        const y = (i < x.length ? x[i] : 0) * g + c1 * y1 + c2 * y2;
+        y2 = y1;
+        y1 = y;
+        out[i] += y;
+      }
     }
-    if (nz.amp) {
-      const dec = nz.decay || 0.01;
-      const n = Math.min(d.length - i0, Math.ceil(dec * sr * 7));
-      const b = new Float32Array(n);
-      for (let i = 0; i < n; i++) b[i] = (R() * 2 - 1) * Math.exp(-i / (dec * sr));
-      if (nz.lp) biquad(b, sr, "lp", nz.lp, 0.8);
-      if (nz.hp) biquad(b, sr, "hp", nz.hp, 0.7);
-      if (nz.bp) biquad(b, sr, "bp", nz.bp, nz.q || 1.5);
-      for (let i = 0; i < n; i++) d[i0 + i] += b[i] * level * nz.amp;
+    const k = level / Math.max(1e-6, norm) * 1.6;
+    for (let i = 0; i < n; i++) d[i0 + i] += out[i] * k;
+  }
+  // Удар: контакт длительностью tc (с) + шумовой «треск» контакта + корпус.
+  hit(t, level, body, o = {}) {
+    const sr = this.sr, i0 = Math.floor(t * sr);
+    if (i0 >= this.d.length) return this;
+    const tc = jit(o.tc ?? 2e-4, 0.2);
+    const nc = Math.max(2, Math.round(tc * sr));
+    const nn = Math.round((o.noise ?? 12e-4) * sr);
+    const x = new Float32Array(Math.max(nc, nn) + 2);
+    for (let i = 0; i < nc; i++) x[i] += Math.sin(Math.PI * i / nc) ** 2 * (o.push ?? 1);
+    const na = o.grit ?? 0.35;
+    for (let i = 0; i < nn; i++) x[i] += (R() * 2 - 1) * na * Math.exp(-i / (nn * 0.3 + 1));
+    this.resonate(x, i0, body, level, o.damp ?? 1);
+    if (o.click) {
+      const m = Math.round(15e-4 * sr), b = new Float32Array(m);
+      for (let i = 0; i < m; i++) b[i] = (R() * 2 - 1) * Math.exp(-i / (sr * 25e-5));
+      biquad(b, sr, "hp", o.clickHp ?? 3e3, 0.7);
+      for (let i = 0; i < m && i0 + i < this.d.length; i++) this.d[i0 + i] += b[i] * level * o.click;
     }
     return this;
   }
-  // трение: длительность, полоса f0→f1, плотность зацепов в секунду
-  scrape(t, dur, level, f0, f1, o = {}) {
-    const sr = this.sr, i0 = Math.floor(t * sr), n = Math.min(this.d.length - i0, Math.floor(dur * sr));
+  // Масса оружия: низкий глухой «тук» (руки гасят его за 20–40 мс).
+  mass(t, level, f = 160, dec = 0.025) {
+    const sr = this.sr, i0 = Math.floor(t * sr), n = Math.min(this.d.length - i0, Math.ceil(sr * dec * 6));
+    if (n <= 0) return this;
     const b = new Float32Array(n);
-    const rate = o.rate ?? 900, rough = o.rough ?? 0.6;
+    for (let i = 0; i < n; i++) b[i] = (R() * 2 - 1) * Math.exp(-i / (sr * dec * 0.35));
+    biquad(b, sr, "lp", jit(f * 2.2), 0.7);
+    biquad(b, sr, "lp", jit(f * 2.2), 0.7);
+    biquad(b, sr, "hp", 45, 0.7);
+    const np = Math.round(sr / f * 0.5);
+    for (let i = 0; i < n; i++) this.d[i0 + i] += level * (b[i] * 2.2 + (i < np ? Math.sin(Math.PI * i / np) * 0.5 : 0));
+    return this;
+  }
+  // Трение: поток микрозацепов через корпус + широкополосное шуршание.
+  scrape(t, dur, level, body, o = {}) {
+    const sr = this.sr, i0 = Math.floor(t * sr), n = Math.min(this.d.length - i0, Math.floor(dur * sr));
+    if (n <= 0) return this;
+    const x = new Float32Array(n), hiss = new Float32Array(n);
+    const rate0 = o.rate ?? 700, rate1 = o.rate1 ?? rate0;
+    const shape2 = o.shape || ((k) => Math.sin(Math.PI * Math.min(1, k * 1.1)) ** 0.6);
     let next = 0;
     for (let i = 0; i < n; i++) {
-      let v = (R() * 2 - 1) * (1 - rough) * 0.35;
+      const k = i / n, env = shape2(k), rate = rate0 + (rate1 - rate0) * k;
       if (i >= next) {
-        v += (R() * 2 - 1) * rough * 2.2;
-        next = i + Math.floor(sr / rate * (0.3 + R() * 1.4));
+        const a = env * (0.3 + R() * 0.7) * (R() < 0.08 ? 2.2 : 1);
+        const m = Math.max(2, Math.round(sr * jit(o.tc ?? 15e-5, 0.4)));
+        for (let j = 0; j < m && i + j < n; j++) x[i + j] += a * Math.sin(Math.PI * j / m) ** 2;
+        next = i + Math.max(1, Math.round(sr / rate * (0.2 + R() * 1.6)));
       }
-      b[i] = v;
+      hiss[i] = (R() * 2 - 1) * env;
     }
-    const seg = 256, out = new Float32Array(n);
-    for (let s = 0; s < n; s += seg) {
-      const f = f0 * Math.pow(f1 / f0, s / n);
-      const from = Math.max(0, s - 64);
-      const part = biquad(b.slice(from, Math.min(n, s + seg)), sr, "bp", f, o.q ?? 1.8);
-      for (let i = s - from; i < part.length; i++) out[from + i] = part[i];
-    }
-    const shape2 = o.shape || ((k) => Math.sin(Math.PI * Math.min(1, k * 1.15)) ** 0.7);
-    for (let i = 0; i < n; i++) this.d[i0 + i] += out[i] * level * 3.2 * shape2(i / n);
+    this.resonate(x, i0, body, level * 1.1, o.damp ?? 0.8);
+    biquad(hiss, sr, "bp", o.hissF ?? 3200, 0.6);
+    biquad(hiss, sr, "hp", 900, 0.7);
+    biquad(hiss, sr, "lp", 6500, 0.7);
+    const h = (o.hiss ?? 0.25) * level;
+    for (let i = 0; i < n; i++) this.d[i0 + i] += hiss[i] * h;
     return this;
   }
-  // глухой удар (ладонь, пластик, земля)
-  thud(t, level, lp, dec = 0.03, body = 0) {
-    return this.impact(t, level, body ? [[body, dec * 0.8, 0.9], [body * 2.3, dec * 0.4, 0.3]] : [], { amp: 1.4, decay: dec, lp, hp: 60 });
+  // Патроны в магазине: n мелких латунных касаний за dur.
+  rattle(t, dur, level, n = 6) {
+    for (let i = 0; i < n; i++) this.hit(t + R() * dur, level * (0.3 + R() * 0.7), "brass", { tc: 8e-5, noise: 6e-4, grit: 0.5, damp: 0.8 });
+    return this;
+  }
+  // Ладонь по дну магазина: мягкий контакт + шлепок кожи.
+  palm(t, level, body = "poly") {
+    this.hit(t, level * 0.6, body, { tc: 4e-3, noise: 4e-3, grit: 0.25, damp: 0.7 });
+    const sr = this.sr, i0 = Math.floor(t * sr), n = Math.min(this.d.length - i0, Math.round(sr * 0.02));
+    const b = new Float32Array(Math.max(0, n));
+    for (let i = 0; i < n; i++) b[i] = (R() * 2 - 1) * Math.exp(-i / (sr * 3e-3));
+    biquad(b, sr, "bp", jit(1400), 0.8);
+    for (let i = 0; i < n; i++) this.d[i0 + i] += b[i] * level * 0.9;
+    return this.mass(t + 1e-3, level * 0.5, 120, 0.02);
   }
   buffer(ctx) {
-    const d = this.d;
+    const d = this.d, sr = this.sr;
+    biquad(d, sr, "hp", 40, 0.7);
     let pk = 0;
-    for (let i = 0; i < d.length; i++) pk = Math.max(pk, Math.abs(d[i]));
-    const g = pk > 0.98 ? 0.98 / pk : 1;
-    const fade = Math.min(d.length, Math.floor(this.sr * 0.01));
+    for (let i = 0; i < d.length; i++) {
+      d[i] = Math.tanh(d[i] * 1.2) / 1.2;
+      pk = Math.max(pk, Math.abs(d[i]));
+    }
+    const g = pk > 0 ? 0.9 / pk : 1;
+    const fade = Math.min(d.length, Math.floor(sr * 0.01));
     for (let i = 0; i < d.length; i++) d[i] *= g * (i > d.length - fade ? (d.length - i) / fade : 1);
-    const b = ctx.createBuffer(1, d.length, this.sr);
+    const b = ctx.createBuffer(1, d.length, sr);
     b.getChannelData(0).set(d);
     return b;
   }
 };
-var STEEL_SMALL = [[2350, 6e-3, 0.5], [3900, 4e-3, 0.45], [5600, 3e-3, 0.35], [7700, 22e-4, 0.25], [9800, 16e-4, 0.15]];
-var STEEL_MED = [[1150, 0.012, 0.45], [1870, 9e-3, 0.4], [2760, 7e-3, 0.35], [4100, 5e-3, 0.3], [6200, 35e-4, 0.2]];
-var CARRIER = [[160, 0.03, 0.9], [340, 0.022, 0.55], [760, 0.014, 0.45], [1450, 9e-3, 0.4], [2650, 6e-3, 0.35], [4300, 4e-3, 0.25], [6800, 25e-4, 0.15]];
-var POLY = [[420, 0.012, 0.6], [900, 8e-3, 0.4], [1700, 5e-3, 0.25]];
-var ALU_WELL = [[610, 0.016, 0.5], [1320, 0.01, 0.4], [2240, 7e-3, 0.3], [3500, 5e-3, 0.2]];
+var recv = (o) => o.fam === "ak" ? "sheet" : "alu";
+var magB = (o) => o.kind === "steel" ? "magSteel" : "poly";
 var RECIPES = {
-  // кнопка магазина нажата
-  release(T2) {
-    T2.impact(0, 0.35, STEEL_SMALL, { amp: 0.4, decay: 3e-3, hp: 2500 });
-    T2.impact(0.012, 0.18, STEEL_SMALL.slice(1), { amp: 0.2, decay: 2e-3, hp: 3500 });
-  },
-  // магазин выходит из шахты: трение, выход губок, хват рукой
+  // Сброс магазина. AR/SCAR: кнопка → защёлка отпускает → магазин выскальзывает
+  // под собственным весом (трение о шахту, патроны шевелятся).
+  // АК: нажим на рычаг защёлки, магазин проворачивают вперёд и выводят зацеп.
   magOut(T2, o) {
-    const poly = o.kind !== "steel";
     if (o.fam === "ak") {
-      T2.impact(0, 0.32, STEEL_SMALL, { amp: 0.3, decay: 3e-3, hp: 2e3 });
-      T2.scrape(0.02, 0.12, 0.2, 1800, 1100, { rate: 700, rough: 0.7 });
-      T2.impact(0.13, 0.5, poly ? POLY : STEEL_MED, { amp: 0.6, decay: 6e-3, lp: 5e3 });
-      T2.scrape(0.15, 0.1, 0.14, 1300, 800, { rate: 500 });
+      T2.hit(0, 0.35, "small", { tc: 15e-4, noise: 2e-3, grit: 0.2 });
+      T2.hit(0.03, 0.7, "steel", { tc: 12e-5, click: 0.25 });
+      T2.hit(0.032, 0.45, "sheet", { tc: 2e-4, damp: 0.8 });
+      T2.scrape(0.05, 0.1, 0.35, magB(o), { rate: 500, rate1: 300, tc: 3e-4 });
+      T2.hit(0.15, 0.55, magB(o), { tc: o.kind === "steel" ? 3e-4 : 8e-4 });
+      T2.hit(0.152, 0.3, "sheet", { tc: 3e-4, damp: 0.7 });
+      T2.rattle(0.15, 0.1, 0.12, 5);
     } else {
-      RECIPES.release(T2);
-      T2.scrape(0.018, 0.13, poly ? 0.2 : 0.26, poly ? 1400 : 2100, poly ? 900 : 1300, { rate: poly ? 600 : 1100, rough: 0.55 });
-      T2.impact(0.14, 0.22, poly ? POLY : ALU_WELL, { amp: 0.3, decay: 4e-3, lp: 6e3 });
+      T2.hit(0, 0.3, "small", { tc: 18e-4, noise: 2e-3, grit: 0.2 });
+      T2.hit(0.012, 0.6, "small", { tc: 1e-4, click: 0.3 });
+      T2.hit(0.013, 0.35, recv(o), { tc: 15e-5, damp: 0.6 });
+      T2.scrape(0.02, 0.12, 0.4, magB(o), { rate: 900, rate1: 500, tc: 18e-5, hiss: 0.3, shape: (k) => (1 - k) ** 0.7 * Math.min(1, k * 8) });
+      T2.rattle(0.03, 0.12, 0.1, 6);
+      T2.hit(0.135, 0.3, magB(o), { tc: 4e-4 });
     }
-    T2.thud(0.2, 0.18, 700, 0.02);
   },
-  // магазин входит в шахту (до посадки)
+  // Магазин входит в шахту: касание раструба, скольжение.
   magInsert(T2, o) {
-    const poly = o.kind !== "steel";
     if (o.fam === "ak") {
-      T2.impact(0, 0.42, poly ? POLY : STEEL_MED, { amp: 0.5, decay: 5e-3, hp: 900 });
-      T2.scrape(0.01, 0.07, 0.16, 1500, 2200, { rate: 800 });
+      T2.hit(0, 0.55, magB(o), { tc: o.kind === "steel" ? 25e-5 : 7e-4 });
+      T2.hit(2e-3, 0.35, "sheet", { tc: 2e-4, damp: 0.7 });
+      T2.scrape(0.012, 0.06, 0.28, magB(o), { rate: 600, tc: 2e-4 });
+      T2.rattle(0, 0.05, 0.1, 4);
     } else {
-      T2.scrape(0, 0.1, poly ? 0.2 : 0.26, poly ? 900 : 1300, poly ? 1600 : 2600, { rate: poly ? 700 : 1300, rough: 0.5, shape: (k) => Math.min(1, k * 3) * (1 - k * 0.3) });
+      T2.hit(0, 0.4, magB(o), { tc: o.kind === "steel" ? 3e-4 : 8e-4 });
+      T2.scrape(6e-3, 0.1, 0.42, magB(o), { rate: 600, rate1: 1300, tc: 16e-5, hiss: 0.35, hissF: 2600, shape: (k) => Math.min(1, k * 5) * (1 - 0.4 * k) });
+      T2.rattle(0.01, 0.09, 0.08, 5);
     }
   },
-  // посадка: удар в упор + щелчок защёлки (+ ладонь по дну у AR/SCAR)
+  // Посадка: магазин в упор, защёлка заскакивает в окно (+ ладонь по дну у AR/SCAR).
   magIn(T2, o) {
-    const poly = o.kind !== "steel";
     if (o.fam === "ak") {
-      T2.scrape(0, 0.05, 0.12, 1200, 1800, { rate: 600 });
-      T2.impact(0.05, 0.85, poly ? [[380, 0.016, 0.7], [820, 0.012, 0.5], ...STEEL_MED.slice(1)] : [[520, 0.018, 0.6], ...STEEL_MED], { amp: 0.9, decay: 6e-3, lp: 7e3 });
-      T2.impact(0.058, 0.4, STEEL_SMALL, { amp: 0.4, decay: 2e-3, hp: 3e3 });
-      T2.thud(0.05, 0.35, 500, 0.025, 180);
+      T2.scrape(0, 0.045, 0.22, "sheet", { rate: 450, tc: 25e-5, hiss: 0.15 });
+      T2.hit(0.048, 1, "steel", { tc: 1e-4, click: 0.35 });
+      T2.hit(0.048, 0.8, "sheet", { tc: 15e-5 });
+      T2.hit(0.05, 0.45, magB(o), { tc: 3e-4 });
+      T2.mass(0.048, 0.35, 170, 0.02);
+      T2.rattle(0.052, 0.06, 0.1, 4);
     } else {
-      T2.thud(0, 0.55, 900, 0.03, poly ? 210 : 260);
-      T2.impact(2e-3, 0.7, poly ? [[330, 0.02, 0.8], ...POLY] : [[280, 0.022, 0.7], ...ALU_WELL], { amp: 0.7, decay: 7e-3, lp: 5500 });
-      T2.impact(0.016, 0.55, STEEL_SMALL, { amp: 0.5, decay: 25e-4, hp: 2800 });
-      T2.impact(0.021, 0.2, STEEL_SMALL.slice(2), { amp: 0.15, decay: 15e-4, hp: 4e3 });
+      T2.hit(0, 0.9, recv(o), { tc: 18e-5, click: 0.15 });
+      T2.hit(1e-3, 0.5, magB(o), { tc: 4e-4 });
+      T2.mass(0, 0.45, 150, 0.025);
+      T2.hit(9e-3, 0.75, "small", { tc: 8e-5, click: 0.35 });
+      T2.rattle(4e-3, 0.05, 0.1, 5);
+      T2.palm(0.05, 0.55, magB(o));
+      T2.hit(0.052, 0.3, recv(o), { tc: 3e-4, damp: 0.7 });
     }
   },
-  // рукоять назад: хват, трение рамы, сжатие пружины, удар в заднем положении
+  // Рукоять назад: хват, отпирание, трение рамы, сжатие пружины, упор.
   chargeBack(T2, o) {
-    T2.thud(0, 0.14, 1200, 0.012);
-    T2.impact(4e-3, 0.28, STEEL_MED, { amp: 0.35, decay: 4e-3, hp: 1500 });
-    T2.scrape(0.01, 0.17, 0.26, 1400, 3400, { rate: o.fam === "ak" ? 700 : 1200, rough: 0.5, q: 2.4 });
-    T2.scrape(0.02, 0.16, 0.08, 5200, 7200, { rate: 2400, rough: 0.3, q: 3 });
-    T2.impact(0.19, 0.55, CARRIER.slice(2), { amp: 0.5, decay: 5e-3, lp: 7e3 });
+    const ak = o.fam === "ak";
+    T2.hit(0, 0.2, "poly", { tc: 3e-3, noise: 3e-3, grit: 0.2 });
+    if (!ak) T2.hit(0.012, 0.45, "small", { tc: 1e-4, click: 0.2 });
+    T2.hit(0.02, 0.55, "steel", { tc: 15e-5 });
+    T2.scrape(0.03, 0.15, 0.5, ak ? "sheet" : "steel", { rate: ak ? 500 : 900, rate1: ak ? 900 : 1500, tc: 16e-5, hiss: 0.3, hissF: 3800 });
+    T2.hit(0.18, 0.6, ak ? "sheet" : recv(o), { tc: 2e-4 });
+    T2.hit(0.181, 0.4, "steel", { tc: 12e-5, damp: 0.7 });
   },
-  // рама вперёд: короткое трение, мощный удар запирания, доворот затвора
+  // Рама вперёд: пружина разгоняет, досылание патрона, мощное запирание.
   chargeRelease(T2, o) {
-    T2.scrape(0, 0.05, 0.22, 3e3, 1600, { rate: 1600, rough: 0.5 });
     const big = o.fam === "ak" || o.cal === "762x51" ? 1.15 : 1;
-    T2.impact(0.05, 0.95 * big, CARRIER, { amp: 0.9, decay: 8e-3, lp: 6500 });
-    T2.impact(0.058, 0.35, STEEL_SMALL, { amp: 0.35, decay: 2e-3, hp: 3e3 });
-    T2.impact(0.066, 0.3, STEEL_MED.slice(1), { amp: 0.2, decay: 3e-3, hp: 1800 });
+    T2.scrape(0, 0.035, 0.45, "steel", { rate: 1800, tc: 12e-5, hiss: 0.35, hissF: 4500 });
+    T2.scrape(0.02, 0.02, 0.3, "brass", { rate: 1500, tc: 1e-4 });
+    T2.hit(0.042, 1 * big, "steel", { tc: 1e-4, click: 0.3 });
+    T2.hit(0.042, 0.9 * big, recv(o), { tc: 15e-5 });
+    T2.mass(0.042, 0.5 * big, 140, 0.028);
+    T2.hit(0.05, 0.4, "small", { tc: 1e-4, damp: 0.8 });
+    if (o.fam !== "ak") T2.hit(0.075, 0.3, "small", { tc: 1e-4, click: 0.15 });
   },
-  // затворная задержка: нажатие кнопки, затем удар рамы
-  boltCatch(T2) {
-    T2.impact(0, 0.3, STEEL_SMALL, { amp: 0.35, decay: 3e-3, hp: 2200 });
-    T2.impact(0.035, 1, CARRIER, { amp: 0.9, decay: 8e-3, lp: 6500 });
-    T2.impact(0.043, 0.35, STEEL_SMALL, { amp: 0.3, decay: 2e-3, hp: 3e3 });
+  // Затворная задержка: ладонь по кнопке, рама вперёд.
+  boltCatch(T2, o) {
+    T2.hit(0, 0.35, "small", { tc: 15e-4, noise: 2e-3 });
+    T2.hit(0.01, 0.45, "small", { tc: 1e-4, click: 0.2 });
+    T2.scrape(0.012, 0.03, 0.4, "steel", { rate: 1800, tc: 12e-5, hiss: 0.3, hissF: 4500 });
+    T2.hit(0.043, 1, "steel", { tc: 1e-4, click: 0.3 });
+    T2.hit(0.043, 0.85, recv(o), { tc: 15e-5 });
+    T2.mass(0.043, 0.45, 140, 0.028);
   },
-  // магазин падает на бетон
+  // Магазин падает на бетон и подпрыгивает.
   magGround(T2, o) {
-    const poly = o.kind !== "steel";
-    T2.thud(0, 0.7, 700, 0.03, 140);
-    T2.impact(4e-3, 0.4, poly ? POLY : [[900, 0.03, 0.5], [1650, 0.02, 0.4], [2900, 0.012, 0.3], [4700, 8e-3, 0.2]], { amp: 0.4, decay: 0.01, lp: 4e3 });
-    T2.thud(0.11 + R() * 0.04, 0.25, 600, 0.02, 160);
-    if (!poly) T2.impact(0.12, 0.18, [[1100, 0.02, 0.5], [2300, 0.012, 0.3]], { amp: 0.2, decay: 6e-3, lp: 3500 });
+    const steel = o.kind === "steel";
+    T2.hit(0, 0.9, "ground", { tc: 6e-4 });
+    T2.hit(1e-3, 0.8, magB(o), { tc: steel ? 15e-5 : 5e-4, click: steel ? 0.2 : 0.05 });
+    T2.mass(0, 0.4, 110, 0.02);
+    T2.rattle(2e-3, 0.08, 0.2, 8);
+    const b = 0.1 + R() * 0.05;
+    T2.hit(b, 0.35, magB(o), { tc: steel ? 2e-4 : 6e-4 });
+    T2.hit(b, 0.3, "ground", { tc: 8e-4 });
+    T2.hit(b + 0.06 + R() * 0.03, 0.15, magB(o), { tc: 5e-4 });
   },
-  // спуск без выстрела: удар курка
-  dryFire(T2) {
-    T2.impact(0, 0.6, [[900, 0.01, 0.5], ...STEEL_MED.slice(1)], { amp: 0.6, decay: 4e-3, hp: 800 });
-    T2.impact(4e-3, 0.25, STEEL_SMALL, { amp: 0.3, decay: 2e-3, hp: 3e3 });
+  // Спуск без выстрела: удар курка по ударнику.
+  dryFire(T2, o) {
+    T2.hit(0, 0.25, "small", { tc: 1e-4 });
+    T2.hit(6e-3, 0.8, "steel", { tc: 1e-4, click: 0.25 });
+    T2.hit(6e-3, 0.45, recv(o), { tc: 2e-4, damp: 0.7 });
   },
-  // переводчик: пружинный фиксатор
-  selector(T2) {
-    T2.scrape(0, 0.035, 0.08, 2500, 3500, { rate: 1500 });
-    T2.impact(0.03, 0.45, STEEL_SMALL, { amp: 0.4, decay: 25e-4, hp: 2500 });
-    T2.impact(0.037, 0.2, STEEL_MED.slice(2), { amp: 0.15, decay: 2e-3, hp: 2e3 });
+  // Переводчик: подпружиненный фиксатор перескакивает в лунку.
+  selector(T2, o) {
+    T2.scrape(0, 0.03, 0.18, "small", { rate: 1500, tc: 1e-4, hiss: 0.1 });
+    T2.hit(0.03, 0.6, "small", { tc: 1e-4, click: 0.25 });
+    T2.hit(0.031, 0.3, recv(o), { tc: 2e-4, damp: 0.6 });
   },
   click(T2) {
-    T2.impact(0, 0.3, STEEL_SMALL.slice(1), { amp: 0.3, decay: 2e-3, hp: 3e3 });
+    T2.hit(0, 0.5, "small", { tc: 1e-4, click: 0.2 });
+  },
+  // Короткий удар металла общего назначения (детали на планке, сошки, приклад).
+  tick(T2, o) {
+    T2.hit(0, 0.6, o.kind === "poly" ? "poly" : "steel", { tc: o.kind === "poly" ? 6e-4 : 12e-5, click: 0.15 });
+  },
+  // Механика при выстреле: отпирание, удар рамы в буфер, накат и запирание.
+  cycle(T2, o) {
+    const cyc = 60 / (o.rpm || 700);
+    T2.hit(1e-3, 0.45, "steel", { tc: 1e-4 });
+    T2.scrape(4e-3, cyc * 0.35, 0.25, "steel", { rate: 2e3, tc: 1e-4, hiss: 0.2, hissF: 4500 });
+    T2.hit(cyc * 0.45, 0.4, recv(o), { tc: 2e-4 });
+    T2.hit(cyc * 0.85, 0.7, "steel", { tc: 1e-4, click: 0.15 });
+    T2.hit(cyc * 0.85, 0.5, recv(o), { tc: 15e-5 });
+  },
+  // Гильза о бетон: тонкостенная латунная (стальная) трубка звенит коротко.
+  casing(T2, o) {
+    const body = o.kind === "steel" ? { ...BODY.magSteel, f0: 1800, f1: 9e3, tau: 0.02, n: 30 } : { ...BODY.brass, f0: 2600, f1: 11e3, tau: 0.03, n: 26, decK: 0.5 };
+    T2.hit(0, 0.6, body, { tc: 8e-5, noise: 8e-4 });
+    T2.hit(0.06 + R() * 0.05, 0.3, body, { tc: 1e-4 });
+    T2.hit(0.15 + R() * 0.08, 0.15, body, { tc: 1e-4 });
   }
 };
-var LEN = { magOut: 0.34, magInsert: 0.14, magIn: 0.16, chargeBack: 0.26, chargeRelease: 0.16, boltCatch: 0.14, magGround: 0.26, dryFire: 0.06, selector: 0.07, click: 0.04 };
+var LEN = { magOut: 0.3, magInsert: 0.16, magIn: 0.16, chargeBack: 0.26, chargeRelease: 0.16, boltCatch: 0.14, magGround: 0.32, dryFire: 0.08, selector: 0.08, click: 0.05, tick: 0.06, cycle: 0.14, casing: 0.36 };
 var VARIANTS = 3;
 var Foley = class {
   constructor(ctx) {
@@ -1687,7 +1863,7 @@ var Foley = class {
     this.cache = /* @__PURE__ */ new Map();
   }
   buffer(name, o = {}) {
-    const key = name + "|" + (o.fam || "") + "|" + (o.kind || "") + "|" + (o.cal || "");
+    const key = name + "|" + (o.fam || "") + "|" + (o.kind || "") + "|" + (o.cal || "") + "|" + (o.rpm || "");
     let list = this.cache.get(key);
     if (!list) {
       list = [];
@@ -1701,6 +1877,7 @@ var Foley = class {
     return list[Math.random() * list.length | 0];
   }
 };
+var FOLEY_NAMES = Object.keys(RECIPES);
 
 // src/engine/audio.js
 var CAL2 = {
@@ -1839,58 +2016,6 @@ var GunAudio = class {
       n.connect(w).connect(this.verb);
     }
   }
-  // Щелчок/лязг металла: полосовой шум + затухающие моды.
-  clank(t, f, level, dur = 0.05, q = 6, modes = 2, pan = 0.1, wet = 0.08) {
-    const c = this.ctx;
-    const s = this.src(this.noise, t, dur + 0.02, 1);
-    const bp = c.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = f;
-    bp.Q.value = q;
-    const g = c.createGain();
-    this.env(g, t, 8e-4, level, dur * 0.3, dur + 0.02);
-    s.connect(bp).connect(g);
-    this.out(g, wet, pan);
-    for (let i = 0; i < modes; i++) {
-      const o = c.createOscillator();
-      o.type = "sine";
-      o.frequency.value = f * (1 + i * 1.73) * (0.97 + Math.random() * 0.06);
-      const og = c.createGain();
-      this.env(og, t, 5e-4, level * 0.18 / (i + 1), dur * 0.5, dur * 3);
-      o.connect(og);
-      this.out(og, wet, pan);
-      o.start(t);
-      o.stop(t + dur * 3 + 0.05);
-    }
-  }
-  // Глухой удар (пластик, ладонь).
-  thud(t, f, level, dur = 0.06, pan = 0) {
-    const c = this.ctx;
-    const s = this.src(this.pink, t, dur + 0.02);
-    const lp = c.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = f;
-    const g = c.createGain();
-    this.env(g, t, 1e-3, level, dur * 0.35, dur + 0.02);
-    s.connect(lp).connect(g);
-    this.out(g, 0.05, pan);
-  }
-  // Шорох/скольжение (затвор, магазин в шахте).
-  slide(t, f0, f1, level, dur, pan = 0.1) {
-    const c = this.ctx;
-    const s = this.src(this.noise, t, dur + 0.02);
-    const bp = c.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.Q.value = 2.5;
-    bp.frequency.setValueAtTime(f0, t);
-    bp.frequency.exponentialRampToValueAtTime(f1, t + dur);
-    const g = c.createGain();
-    g.gain.setValueAtTime(1e-4, t);
-    g.gain.linearRampToValueAtTime(level, t + dur * 0.3);
-    g.gain.linearRampToValueAtTime(1e-4, t + dur);
-    s.connect(bp).connect(g);
-    this.out(g, 0.03, pan);
-  }
   /* --------------------------------------------------------------- выстрел */
   shot(o = {}) {
     if (!this.ctx || this.muted) return;
@@ -1969,12 +2094,8 @@ var GunAudio = class {
       s.start(t + 2e-3);
     }
     {
-      const mech = (this.profile.mech ?? 0.8) * (this.muzzle === "supp" ? 1.25 : 1);
-      const cyc = 60 / (this.profile.rpm || 700);
-      this.clank(t + 3e-3, P.mechF, 0.22 * mech, 0.03, 5, 2, 0.15, 0.05);
-      this.clank(t + cyc * 0.45, P.mechF * 0.8, 0.16 * mech, 0.035, 4, 2, 0.15, 0.05);
-      this.clank(t + cyc * 0.85, P.mechF * 1.15, 0.28 * mech, 0.04, 6, 3, 0.12, 0.06);
-      if (this.profile.cal === "762x39" || this.profile.cal === "545") this.clank(t + cyc * 0.9, P.mechF * 0.55, 0.12 * mech, 0.05, 3, 1, 0.1);
+      const mech = (this.profile.mech ?? 0.8) * (this.muzzle === "supp" ? 1.3 : 1);
+      this.play("cycle", { gain: 0.32 * mech, delay: 4e-3, wet: 0.05, pan: 0.15 });
     }
     if (this.muzzle !== "supp") {
       const s = this.src(this.pink, t + 0.34, 0.25);
@@ -1994,7 +2115,7 @@ var GunAudio = class {
     if (!this.foley) this.foley = new Foley(c);
     const P = this.profile;
     const s = c.createBufferSource();
-    s.buffer = this.foley.buffer(name, { fam: P.family, cal: P.cal, kind: o.kind });
+    s.buffer = this.foley.buffer(name, { fam: P.family, cal: P.cal, kind: o.kind, rpm: name === "cycle" ? P.rpm : void 0 });
     s.playbackRate.value = 0.96 + Math.random() * 0.08;
     const g = c.createGain();
     g.gain.value = (o.gain ?? 1) * 0.9;
@@ -2039,45 +2160,36 @@ var GunAudio = class {
     const P = this.profile, o = { fam: P.family, cal: P.cal };
     for (const n of ["magOut", "magInsert", "magIn", "magGround"]) for (const kind of ["steel", "poly"]) this.foley.buffer(n, { ...o, kind });
     for (const n of ["chargeBack", "chargeRelease", "boltCatch", "dryFire", "selector", "click"]) this.foley.buffer(n, o);
+    this.foley.buffer("cycle", { ...o, rpm: P.rpm });
+    for (const kind of ["steel", "poly"]) this.foley.buffer("tick", { ...o, kind });
+    for (const kind of ["steel", "brass"]) this.foley.buffer("casing", { ...o, kind });
   }
   // Установка модуля: щелчки прижима или храповик резьбы.
   attach(kind) {
     if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
     if (kind === "thread" || kind === "supp") {
-      for (let i = 0; i < 7; i++) this.clank(t + i * 0.055, 3600 + Math.random() * 400, 0.1, 0.012, 9, 1, 0);
-      this.clank(t + 0.42, 2300, 0.2, 0.04, 5, 2, 0);
+      for (let i = 0; i < 6; i++) this.play("tick", { kind: "steel", gain: 0.25 + Math.random() * 0.1, delay: i * 0.06 + Math.random() * 0.01, pan: 0 });
+      this.play("tick", { kind: "steel", gain: 0.6, delay: 0.42, pan: 0 });
     } else if (kind === "poly") {
-      this.thud(t, 1400, 0.25, 0.04);
-      this.clank(t + 0.03, 3e3, 0.1, 0.02, 6, 1, 0);
+      this.play("tick", { kind: "poly", gain: 0.6, pan: 0 });
+      this.play("tick", { kind: "steel", gain: 0.25, delay: 0.03, pan: 0 });
     } else {
-      this.clank(t, 2600, 0.2, 0.03, 5, 2, 0);
-      this.clank(t + 0.09, 3900, 0.14, 0.02, 8, 1, 0);
-      this.slide(t + 0.12, 3e3, 5e3, 0.05, 0.08, 0);
+      this.play("tick", { kind: "steel", gain: 0.55, pan: 0 });
+      this.play("tick", { kind: "steel", gain: 0.35, delay: 0.09, pan: 0 });
     }
   }
   fold() {
-    if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
-    this.clank(t, 2400, 0.22, 0.03, 5, 2, 0.1);
-    this.clank(t + 0.22, 1900, 0.35, 0.05, 4, 2, 0.1);
+    this.play("tick", { kind: "steel", gain: 0.5 });
+    this.play("tick", { kind: "steel", gain: 0.8, delay: 0.22 });
   }
   bipod() {
-    if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
-    this.slide(t, 1500, 3e3, 0.08, 0.12);
-    this.clank(t + 0.12, 2100, 0.3, 0.05, 4, 3, 0);
-    this.clank(t + 0.15, 2300, 0.25, 0.05, 4, 3, 0);
+    this.play("tick", { kind: "steel", gain: 0.6, delay: 0.12, pan: 0 });
+    this.play("tick", { kind: "steel", gain: 0.5, delay: 0.15, pan: 0 });
   }
   // Гильза падает на бетон/землю.
   casing(delay = 0.5, steel = false, vol = 1) {
     if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime + delay;
-    const f = steel ? 3600 : 5600;
-    const pan = 0.35 + Math.random() * 0.3;
-    this.clank(t, f * (0.9 + Math.random() * 0.2), 0.08 * vol, 0.05, 12, 3, pan, 0.1);
-    this.clank(t + 0.07 + Math.random() * 0.05, f * 1.1 * (0.9 + Math.random() * 0.2), 0.04 * vol, 0.04, 12, 2, pan, 0.1);
-    this.clank(t + 0.16 + Math.random() * 0.08, f * 0.95, 0.02 * vol, 0.03, 12, 1, pan, 0.1);
+    this.play("casing", { kind: steel ? "steel" : "brass", gain: 0.22 * vol, delay, pan: 0.35 + Math.random() * 0.3, wet: 0.1 });
   }
   // Попадание в стальную мишень: звон, приходит с задержкой по дальности.
   ding(dist, level = 1) {
@@ -2120,6 +2232,15 @@ function tex(size, draw2) {
   t.colorSpace = THREE6.SRGBColorSpace;
   return t;
 }
+function texWH(w, h, draw2) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  draw2(c.getContext("2d"), w, h);
+  const t = new THREE6.CanvasTexture(c);
+  t.colorSpace = THREE6.SRGBColorSpace;
+  return t;
+}
 var R2 = Math.random;
 var TEX = {};
 function textures() {
@@ -2133,73 +2254,108 @@ function textures() {
     g.fillStyle = gr;
     g.fillRect(0, 0, s, s);
   });
-  const flash = (seed) => tex(256, (g, s) => {
-    g.translate(s / 2, s / 2);
-    const n = 7 + seed * 2;
-    for (let i = 0; i < n; i++) {
-      g.rotate(Math.PI * 2 / n + (R2() - 0.5) * 0.5);
-      const L = s * (0.26 + R2() * 0.22), w = s * (0.025 + R2() * 0.03);
-      const gr2 = g.createLinearGradient(0, 0, L, 0);
-      gr2.addColorStop(0, "rgba(255,244,210,1)");
-      gr2.addColorStop(0.45, "rgba(255,190,90,.75)");
-      gr2.addColorStop(1, "rgba(255,120,30,0)");
+  const flameSide = (o) => texWH(256, 96, (g, w, h) => {
+    g.globalCompositeOperation = "lighter";
+    const env = (u) => Math.pow(Math.sin(Math.PI * Math.min(1, u / o.peak) * 0.5), 0.8) * Math.pow(1 - u, o.taper);
+    for (let i = 0; i < o.n; i++) {
+      const u = Math.pow(R2(), o.bias) * 0.92;
+      const r = h * 0.5 * env(u) * (0.35 + R2() * 0.65);
+      if (r < 1) continue;
+      const x = u * w, y = h / 2 + (R2() - 0.5) * h * 0.5 * env(u);
+      const hot = Math.max(0, 1 - u * 2.2);
+      const gr2 = g.createRadialGradient(x, y, 0, x, y, r);
+      const a = (0.1 + R2() * 0.14) * (1 - u * 0.6);
+      gr2.addColorStop(0, `rgba(255,${Math.round(190 + 60 * hot)},${Math.round(90 + 150 * hot)},${a * 1.6})`);
+      gr2.addColorStop(0.45, `rgba(255,${Math.round(140 + 60 * hot)},${Math.round(40 + 60 * hot)},${a})`);
+      gr2.addColorStop(1, "rgba(255,90,20,0)");
       g.fillStyle = gr2;
       g.beginPath();
-      g.moveTo(0, -w);
-      g.quadraticCurveTo(L * 0.5, -w * 0.8, L, 0);
-      g.quadraticCurveTo(L * 0.5, w * 0.8, 0, w);
+      g.ellipse(x, y, r * (1.3 + R2()), r, (R2() - 0.5) * 0.6, 0, 7);
       g.fill();
+    }
+    const cr = h * 0.2;
+    const gr = g.createRadialGradient(4, h / 2, 0, 4, h / 2, cr * 2.4);
+    gr.addColorStop(0, "rgba(255,252,235,1)");
+    gr.addColorStop(0.3, "rgba(255,230,160,.7)");
+    gr.addColorStop(1, "rgba(255,160,60,0)");
+    g.fillStyle = gr;
+    g.beginPath();
+    g.ellipse(4, h / 2, cr * 2.4, cr, 0, 0, 7);
+    g.fill();
+    g.globalCompositeOperation = "destination-in";
+    const fx = g.createLinearGradient(0, 0, w, 0);
+    fx.addColorStop(0, "rgba(0,0,0,1)");
+    fx.addColorStop(0.75, "rgba(0,0,0,.9)");
+    fx.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = fx;
+    g.fillRect(0, 0, w, h);
+  });
+  TEX.flameLong = [0, 1, 2].map(() => flameSide({ n: 170, peak: 0.42, taper: 0.8, bias: 1.25 }));
+  TEX.flameShort = [0, 1, 2].map(() => flameSide({ n: 120, peak: 0.25, taper: 1.6, bias: 1.8 }));
+  const star = (petals) => tex(256, (g, s) => {
+    g.translate(s / 2, s / 2);
+    g.globalCompositeOperation = "lighter";
+    const n = petals || 9;
+    const a0 = R2() * 6.28;
+    for (let i = 0; i < n; i++) {
+      const a = a0 + i / n * Math.PI * 2 + (petals ? 0 : (R2() - 0.5) * 0.5);
+      const L = s * (petals ? 0.4 + R2() * 0.08 : 0.2 + R2() * 0.26), wd = s * (petals ? 0.05 : 0.03 + R2() * 0.03);
+      g.save();
+      g.rotate(a);
+      for (let j = 0; j < 5; j++) {
+        const gr2 = g.createLinearGradient(0, 0, L, 0);
+        gr2.addColorStop(0, "rgba(255,244,215,.5)");
+        gr2.addColorStop(0.5, "rgba(255,175,70,.3)");
+        gr2.addColorStop(1, "rgba(255,100,20,0)");
+        g.fillStyle = gr2;
+        const jw = wd * (0.5 + R2() * 0.7), jl = L * (0.6 + R2() * 0.4), dy = (R2() - 0.5) * wd;
+        g.beginPath();
+        g.moveTo(0, dy - jw);
+        g.quadraticCurveTo(jl * 0.55, dy - jw * (0.6 + R2() * 0.6), jl, dy + (R2() - 0.5) * jw);
+        g.quadraticCurveTo(jl * 0.55, dy + jw * (0.6 + R2() * 0.6), 0, dy + jw);
+        g.fill();
+      }
+      g.restore();
     }
     const gr = g.createRadialGradient(0, 0, 0, 0, 0, s * 0.2);
     gr.addColorStop(0, "rgba(255,255,240,1)");
-    gr.addColorStop(0.5, "rgba(255,210,120,.8)");
-    gr.addColorStop(1, "rgba(255,150,50,0)");
+    gr.addColorStop(0.4, "rgba(255,215,130,.75)");
+    gr.addColorStop(1, "rgba(255,140,40,0)");
     g.fillStyle = gr;
     g.beginPath();
     g.arc(0, 0, s * 0.2, 0, 7);
     g.fill();
   });
-  TEX.flash = [flash(0), flash(1)];
-  TEX.jet = tex(256, (g, s) => {
-    for (let i = 0; i < 3; i++) {
-      const gr = g.createRadialGradient(s * 0.12, s / 2, 0, s * 0.12, s / 2, s * (0.75 - i * 0.18));
-      gr.addColorStop(0, "rgba(255,248,225,1)");
-      gr.addColorStop(0.25, "rgba(255,196,90,.85)");
-      gr.addColorStop(0.6, "rgba(255,120,30,.25)");
-      gr.addColorStop(1, "rgba(255,90,10,0)");
-      g.fillStyle = gr;
-      g.beginPath();
-      g.ellipse(s * 0.42, s / 2 + (R2() - 0.5) * s * 0.04, s * 0.42, s * (0.13 - i * 0.03), (R2() - 0.5) * 0.08, 0, 7);
-      g.fill();
-    }
-  });
+  TEX.star = [star(0), star(0), star(0)];
+  TEX.star3 = [star(3), star(3)];
+  TEX.star4 = [star(4), star(4)];
   TEX.smoke = tex(256, (g, s) => {
-    const h = s / 2;
-    for (let c = 0; c < 4; c++) {
-      const ox = c % 2 * h, oy = (c / 2 | 0) * h;
-      g.save();
-      g.beginPath();
-      g.rect(ox, oy, h, h);
-      g.clip();
-      for (let i = 0; i < 26; i++) {
-        const a = R2() * 6.28, rr = R2() * h * 0.22;
-        const x = ox + h / 2 + Math.cos(a) * rr, y = oy + h / 2 + Math.sin(a) * rr, r = h * (0.1 + R2() * 0.2);
-        const gr = g.createRadialGradient(x, y, 0, x, y, r);
-        const k = 0.1 + R2() * 0.16;
-        gr.addColorStop(0, `rgba(255,255,255,${k})`);
-        gr.addColorStop(0.6, `rgba(245,245,245,${k * 0.5})`);
-        gr.addColorStop(1, "rgba(240,240,240,0)");
-        g.fillStyle = gr;
-        g.fillRect(ox, oy, h, h);
+    const h = s / 2, img = g.createImageData(s, s), d = img.data;
+    const N = 32, grid = [];
+    for (let i = 0; i < 4 * N * N; i++) grid.push(R2());
+    const vn = (c, x, y) => {
+      const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+      const at = (a, b) => grid[c * N * N + (b % N + N) % N * N + (a % N + N) % N];
+      const sx = xf * xf * (3 - 2 * xf), sy = yf * yf * (3 - 2 * yf);
+      return (at(xi, yi) * (1 - sx) + at(xi + 1, yi) * sx) * (1 - sy) + (at(xi, yi + 1) * (1 - sx) + at(xi + 1, yi + 1) * sx) * sy;
+    };
+    for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+      const c = (x >= h ? 1 : 0) + (y >= h ? 2 : 0);
+      const u = x % h / h - 0.5, v = y % h / h - 0.5;
+      let f = 0, amp = 0.5, fr = 3;
+      for (let o = 0; o < 5; o++) {
+        f += vn(c, u * fr + 7 * c, v * fr) * amp;
+        amp *= 0.5;
+        fr *= 2.03;
       }
-      g.globalCompositeOperation = "destination-in";
-      const e = g.createRadialGradient(ox + h / 2, oy + h / 2, h * 0.12, ox + h / 2, oy + h / 2, h / 2);
-      e.addColorStop(0, "rgba(0,0,0,1)");
-      e.addColorStop(1, "rgba(0,0,0,0)");
-      g.fillStyle = e;
-      g.fillRect(ox, oy, h, h);
-      g.restore();
+      const r = Math.hypot(u, v) * 2;
+      const fall = Math.max(0, 1 - r * r) ** 1.4;
+      const a = Math.max(0, f - 0.32) * 1.9 * fall;
+      const i = (y * s + x) * 4;
+      d[i] = d[i + 1] = d[i + 2] = 255 * (0.85 + f * 0.15);
+      d[i + 3] = Math.min(255, a * 255);
     }
+    g.putImageData(img, 0, 0);
   });
   TEX.spark = tex(64, (g, s) => {
     const gr = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
@@ -2372,11 +2528,35 @@ var FX = class {
     this.flash = new THREE6.Group();
     this.flash.visible = false;
     scene.add(this.flash);
-    this.flashCore = new THREE6.Sprite(additive(T2.flash[0], 16767392));
-    this.flashFront = [0, 1, 2].map(() => new THREE6.Sprite(additive(T2.glow, 16757594, 0.9)));
-    this.flashJet = new THREE6.Sprite(additive(T2.jet, 16763e3, 0.95));
-    this.flashSide = [0, 1].map(() => new THREE6.Sprite(additive(T2.jet, 16760944, 0.95)));
-    this.flash.add(this.flashCore, ...this.flashFront, this.flashJet, ...this.flashSide);
+    const flameMat = () => new THREE6.MeshBasicMaterial({ map: T2.flameLong[0], transparent: true, blending: THREE6.AdditiveBlending, depthWrite: false, toneMapped: false, side: THREE6.DoubleSide, fog: false });
+    const along = new THREE6.PlaneGeometry(1, 1).translate(0.5, 0, 0);
+    this.flameAxis = new THREE6.Group();
+    this.flamePlanes = [0, 1, 2].map(() => {
+      const m = new THREE6.Mesh(along, flameMat());
+      m.renderOrder = 4;
+      m.frustumCulled = false;
+      this.flameAxis.add(m);
+      return m;
+    });
+    const across = new THREE6.PlaneGeometry(1, 1).rotateY(Math.PI / 2);
+    this.flameStar = new THREE6.Mesh(across, flameMat());
+    this.flameStar.renderOrder = 4;
+    this.flameStar.frustumCulled = false;
+    this.flameAxis.add(this.flameStar);
+    this.jets = [0, 1].map(() => {
+      const g = new THREE6.Group();
+      for (let i = 0; i < 2; i++) {
+        const m = new THREE6.Mesh(along, flameMat());
+        m.rotation.x = i * Math.PI / 2;
+        m.renderOrder = 4;
+        m.frustumCulled = false;
+        g.add(m);
+      }
+      this.flameAxis.add(g);
+      return g;
+    });
+    this.flash.add(this.flameAxis);
+    this.flashFade = 1;
     this.flashLight = new THREE6.PointLight(16754768, 0, 6, 2);
     scene.add(this.flashLight);
     this.flashT = 0;
@@ -2407,6 +2587,7 @@ var FX = class {
     scene.add(this.lampGlow);
     this.ray = new THREE6.Raycaster();
     this._v = new THREE6.Vector3();
+    this._v2 = new THREE6.Vector3();
     this._q = new THREE6.Quaternion();
     this._m = new THREE6.Matrix4();
     this._s = new THREE6.Vector3(1, 1, 1);
@@ -2424,7 +2605,7 @@ var FX = class {
       size: o.size ?? 0.03,
       grow: o.grow ?? 0.3,
       alpha: o.alpha ?? 0.35,
-      color: [g * 1.02, g, g * 0.95],
+      color: o.tint ? [g * 0.96, g * 0.98, g * 1.04] : [g * 1.02, g, g * 0.95],
       drag: o.drag ?? 3.5,
       buoy: o.buoy ?? 0.12,
       turb: o.turb ?? 0.25,
@@ -2432,67 +2613,90 @@ var FX = class {
       gravity: o.gravity ?? 0
     });
   }
-  muzzleFlash(pos, dir, kind, size = 1) {
-    const supp = kind === "supp";
-    const s = supp ? 0.12 : kind === "brake" ? 1.1 : kind === "fh" ? 0.55 : kind === "linear" ? 0.5 : 1;
+  // kind: bare | fh | comp | linear | brake | supp; q — ориентация оружия (боковые струи),
+  // o.flash — заметность вспышки дульного устройства (0..1), o.first — первый выстрел из холодного глушителя
+  muzzleFlash(pos, dir, kind, size = 1, q = null, o = {}) {
+    const T2 = this.T, supp = kind === "supp";
+    const pick = (a3) => a3[R2() * a3.length | 0];
     this.flash.position.copy(pos);
+    if (q) this.flameAxis.quaternion.copy(q);
+    else this.flameAxis.quaternion.setFromUnitVectors(X_AXIS, dir);
     this.flash.visible = true;
-    this.flashT = 0.04 + R2() * 0.018;
-    const k = s * size;
-    this.flashCore.material.map = this.T.flash[R2() * 2 | 0];
-    this.flashCore.scale.setScalar(0.075 * k * (0.75 + R2() * 0.5));
-    this.flashCore.material.rotation = R2() * 6.28;
-    this.flashCore.material.opacity = supp ? 0.35 : 1;
-    this.flashFront.forEach((sp, i) => {
-      sp.position.copy(dir).multiplyScalar((0.03 + i * 0.045) * k);
-      sp.scale.setScalar((0.075 - i * 0.017) * k * (0.75 + R2() * 0.55));
-      sp.visible = !supp;
+    this.flashT = 0.03;
+    this.flashFade = 1;
+    const vis = o.flash ?? 1;
+    const k = size * (0.85 + R2() * 0.3);
+    const P = {
+      bare: { L: 0.3, W: 0.12, a: 1, long: true, star: 0 },
+      fh: { L: 0.11, W: 0.05, a: 0.55, long: false, star: 4 },
+      comp: { L: 0.16, W: 0.07, a: 0.85, long: false, star: 0 },
+      linear: { L: 0.22, W: 0.05, a: 0.8, long: true, star: 0 },
+      brake: { L: 0.1, W: 0.06, a: 0.75, long: false, star: 0 },
+      supp: { L: 0.035, W: 0.025, a: o.first ? 0.7 : 0.25, long: false, star: 0 }
+    }[kind] || { L: 0.2, W: 0.08, a: 0.9, long: true, star: 0 };
+    const a = P.a * (0.35 + 0.65 * Math.min(1, vis * 1.4));
+    const tex2 = P.long ? T2.flameLong : T2.flameShort;
+    const roll = R2() * Math.PI;
+    this.flamePlanes.forEach((m, i) => {
+      m.rotation.x = roll + i * Math.PI / 3;
+      m.material.map = pick(tex2);
+      m.userData.a = a * (i ? 0.75 : 1);
+      m.material.opacity = m.userData.a;
+      m.scale.set(P.L * k * (0.8 + R2() * 0.4), P.W * k * (0.8 + R2() * 0.4), 1);
     });
-    this.flashJet.visible = !supp;
-    this.flashJet.position.copy(dir).multiplyScalar(0.05 * k);
-    this.flashJet.scale.set(0.14 * k * (0.8 + R2() * 0.4), 0.05 * k, 1);
-    this.flashJet.material.opacity = kind === "fh" ? 0.45 : 0.9;
-    const side = new THREE6.Vector3().crossVectors(dir, new THREE6.Vector3(0, 1, 0)).normalize();
-    this.flashSide.forEach((sp, i) => {
-      const sgn = i ? 1 : -1;
-      sp.visible = kind === "brake";
-      sp.position.copy(side).multiplyScalar(sgn * 0.04 * k).addScaledVector(dir, -0.01);
-      sp.scale.set(0.09 * k, 0.04 * k, 1);
-      sp.material.rotation = sgn > 0 ? 0 : Math.PI;
+    this.flameStar.material.map = pick(P.star === 4 ? T2.star4 : P.star === 3 ? T2.star3 : T2.star);
+    this.flameStar.userData.a = a * (supp ? 0.5 : 0.9);
+    this.flameStar.material.opacity = this.flameStar.userData.a;
+    this.flameStar.position.set(P.L * 0.12 * k, 0, 0);
+    this.flameStar.rotation.x = R2() * 6.28;
+    this.flameStar.scale.setScalar(P.W * 1.5 * k * (0.8 + R2() * 0.4));
+    const jetDirs = kind === "brake" ? [[0, 0, 1], [0, 0, -1]] : kind === "comp" ? [[0.25, 1, 0.3], [0.25, 1, -0.3]] : [];
+    this.jets.forEach((g, i) => {
+      const d = jetDirs[i];
+      g.visible = !!d;
+      if (!d) return;
+      g.quaternion.setFromUnitVectors(X_AXIS, new THREE6.Vector3(...d).normalize());
+      g.position.set(P.L * 0.3 * k, 0, 0);
+      const L = (kind === "brake" ? 0.14 : 0.08) * k * (0.8 + R2() * 0.4);
+      g.children.forEach((m) => {
+        m.material.map = pick(T2.flameShort);
+        m.material.opacity = a * 0.8;
+        m.scale.set(L, L * 0.45, 1);
+      });
     });
-    this.flashLight.position.copy(pos).addScaledVector(dir, 0.05);
-    this.flashLight.intensity = supp ? 0.3 : 5 * k;
+    this.flashLight.position.copy(pos).addScaledVector(dir, 0.08);
+    this.flashLight.intensity = (supp ? 0.6 : 7) * a * size;
     this.heat = Math.min(3, this.heat + 0.22 * size);
-    const nSp = supp ? 0 : Math.round((kind === "bare" ? 7 : kind === "brake" ? 6 : 3) * size);
+    const nSp = supp ? 0 : Math.round((kind === "bare" ? 5 : kind === "brake" ? 4 : 2) * size * (0.5 + R2()));
     for (let i = 0; i < nSp; i++) {
-      const v = dir.clone().multiplyScalar(4 + R2() * 7).add(new THREE6.Vector3((R2() - 0.5) * 1.6, (R2() - 0.5) * 1.6, (R2() - 0.5) * 1.6));
-      this.fire.add({ pos: pos.clone().addScaledVector(dir, 0.02), vel: v, life: 0.05 + R2() * 0.08, size: 4e-3 + R2() * 4e-3, alpha: 1, color: [1, 0.72, 0.35], drag: 6, gravity: 2, stretch: 2.5, fadeIn: 0, spin: 0 });
+      const v = dir.clone().multiplyScalar(5 + R2() * 9).add(new THREE6.Vector3((R2() - 0.5) * 2, (R2() - 0.5) * 2, (R2() - 0.5) * 2));
+      this.fire.add({ pos: pos.clone().addScaledVector(dir, 0.03), vel: v, life: 0.04 + R2() * 0.07, size: 25e-4 + R2() * 3e-3, alpha: 1, color: [1, 0.66, 0.3], drag: 7, gravity: 3, stretch: 3, fadeIn: 0, spin: 0 });
     }
-    if (!supp) for (let i = 0; i < 3; i++) {
-      this.fire.add({ pos: pos.clone().addScaledVector(dir, 0.02 + i * 0.03 * k), vel: dir.clone().multiplyScalar(1.5), life: 0.035 + R2() * 0.02, size: 0.035 * k, grow: 0.03 * k, alpha: 0.55, color: [1, 0.62, 0.28], drag: 8, fadeIn: 0 });
-    }
-    const up = new THREE6.Vector3(0, 1, 0);
-    const n = supp ? 3 : kind === "brake" ? 5 : 7;
+    const lvl = size * (supp ? 0.7 : kind === "brake" ? 0.8 : 1);
+    const haze = (p, v, op) => this.smokePuff(p, v, { grey: 0.5 + R2() * 0.12, tint: 1, ...op });
+    const n = supp ? 5 : 8;
     for (let i = 0; i < n; i++) {
-      const v = dir.clone().multiplyScalar(1.5 + R2() * 5).add(new THREE6.Vector3((R2() - 0.5) * 0.5, (R2() - 0.3) * 0.4, (R2() - 0.5) * 0.5));
-      this.smokePuff(pos.clone().addScaledVector(dir, 0.03 + R2() * 0.06), v, { size: 0.025 + R2() * 0.02, grow: 0.28 + R2() * 0.3, alpha: (supp ? 0.16 : 0.3) * size, life: 1.2 + R2() * 1.4, drag: 4.5 });
+      const v = dir.clone().multiplyScalar((supp ? 0.4 : 1.2) + R2() * (supp ? 0.8 : 2.4)).add(new THREE6.Vector3((R2() - 0.5) * 0.35, (R2() - 0.3) * 0.3, (R2() - 0.5) * 0.35));
+      haze(pos.clone().addScaledVector(dir, 0.02 + R2() * 0.12), v, { size: 0.02 + R2() * 0.02, grow: 0.22 + R2() * 0.28, alpha: (0.1 + R2() * 0.07) * lvl, life: 0.9 + R2() * 1.3, drag: 6 + R2() * 3, buoy: 0.06, turb: 0.5, fadeIn: 0.02 });
     }
+    const side = new THREE6.Vector3(0, 0, 1).applyQuaternion(this.flameAxis.quaternion);
+    const up = new THREE6.Vector3(0, 1, 0);
     if (kind === "brake" || kind === "comp") {
       for (let i = 0; i < 6; i++) {
-        const sg = kind === "comp" ? 0 : i % 2 ? 1 : -1;
-        const v = side.clone().multiplyScalar(sg * (2 + R2() * 2.5)).addScaledVector(up, kind === "comp" ? 1.5 + R2() * 2 : (R2() - 0.2) * 0.8).addScaledVector(dir, R2() * 0.8);
-        this.smokePuff(pos.clone(), v, { size: 0.03, grow: 0.3 + R2() * 0.2, alpha: 0.26 * size, life: 1.1 + R2(), drag: 5 });
+        const sg = kind === "comp" ? (R2() - 0.5) * 0.6 : i % 2 ? 1 : -1;
+        const v = side.clone().multiplyScalar(sg * (1.5 + R2() * 2)).addScaledVector(up, kind === "comp" ? 1.2 + R2() * 1.5 : (R2() - 0.2) * 0.6).addScaledVector(dir, R2() * 0.6);
+        haze(pos.clone(), v, { size: 0.02, grow: 0.25 + R2() * 0.2, alpha: 0.09 * size, life: 0.9 + R2() * 0.8, drag: 7, turb: 0.5 });
       }
     }
-    for (let i = 0; i < (supp ? 2 : 3); i++) {
-      this.smokePuff(pos.clone().addScaledVector(dir, 0.05 + R2() * 0.25), dir.clone().multiplyScalar(0.3 + R2() * 0.6).add(new THREE6.Vector3(0, 0.05, 0)), { size: 0.06, grow: 0.45 + R2() * 0.35, alpha: (supp ? 0.12 : 0.18) * size, life: 2.6 + R2() * 1.6, drag: 2.2, buoy: 0.08, turb: 0.35, fadeIn: 0.15, grey: 0.66 });
+    for (let i = 0; i < 2; i++) {
+      haze(pos.clone().addScaledVector(dir, 0.05 + R2() * 0.2), dir.clone().multiplyScalar(0.15 + R2() * 0.3).add(new THREE6.Vector3(0, 0.04, 0)), { size: 0.05, grow: 0.5 + R2() * 0.3, alpha: 0.045 * lvl, life: 2.2 + R2() * 1.5, drag: 2.5, buoy: 0.07, turb: 0.35, fadeIn: 0.2 });
     }
   }
   // пороховые газы из окна выброса
   portSmoke(pos, dir) {
     for (let i = 0; i < 2; i++) {
       const v = dir.clone().multiplyScalar(0.35 + R2() * 0.3).add(new THREE6.Vector3((R2() - 0.5) * 0.1, 0.18 + R2() * 0.1, 0));
-      this.smokePuff(pos.clone(), v, { size: 0.012, grow: 0.12 + R2() * 0.08, alpha: 0.22, life: 0.9 + R2() * 0.6, drag: 3, grey: 0.7 });
+      this.smokePuff(pos.clone(), v, { size: 0.01, grow: 0.1 + R2() * 0.08, alpha: 0.09, life: 0.8 + R2() * 0.6, drag: 3.5, grey: 0.6, tint: 1, turb: 0.3 });
     }
   }
   shellMesh(key, cal, live) {
@@ -2613,14 +2817,24 @@ var FX = class {
       if (this.flashT <= 0) {
         this.flash.visible = false;
         this.flashLight.intensity = 0;
-      } else this.flashLight.intensity *= 0.6;
+      } else {
+        this.flashLight.intensity *= 0.5;
+        this.flashFade *= 0.55;
+      }
+    }
+    if (this.flash.visible && cam) {
+      const ax = this._v.set(1, 0, 0).applyQuaternion(this.flameAxis.quaternion);
+      const f = Math.abs(ax.dot(this._v2.subVectors(this.flash.position, cam.position).normalize()));
+      const F = this.flashFade;
+      this.flameStar.material.opacity = this.flameStar.userData.a * (0.15 + 0.85 * f * f) * F;
+      for (const m of this.flamePlanes) m.material.opacity = m.userData.a * (1 - 0.55 * f * f) * F;
     }
     if (this.heat > 0) {
       this.heat = Math.max(0, this.heat - dt * 0.35);
       this.wispT -= dt;
       if (this.wispT <= 0 && this.heat > 0.3 && muzzle) {
         this.wispT = 0.06 + R2() * 0.05;
-        this.smokePuff(muzzle.clone(), new THREE6.Vector3((R2() - 0.5) * 0.02, 0.1 + R2() * 0.06, (R2() - 0.5) * 0.02), { size: 0.01, grow: 0.09, alpha: Math.min(0.16, this.heat * 0.07), life: 1.8 + R2(), drag: 1.2, buoy: 0.06, turb: 0.12, grey: 0.72, fadeIn: 0.3 });
+        this.smokePuff(muzzle.clone(), new THREE6.Vector3((R2() - 0.5) * 0.02, 0.1 + R2() * 0.06, (R2() - 0.5) * 0.02), { size: 0.01, grow: 0.09, alpha: Math.min(0.08, this.heat * 0.035), life: 1.8 + R2(), drag: 1.2, buoy: 0.06, turb: 0.12, grey: 0.6, tint: 1, fadeIn: 0.3 });
       }
     }
     for (const s of this.shells) {
@@ -2641,7 +2855,7 @@ var FX = class {
       }
       if (s.trail > 0) {
         s.trail -= dt;
-        if (R2() < 0.45) this.smokePuff(s.pos.clone(), s.vel.clone().multiplyScalar(0.1), { size: 6e-3, grow: 0.05, alpha: 0.14, life: 0.5 + R2() * 0.4, drag: 4, grey: 0.74, fadeIn: 0.02 });
+        if (R2() < 0.45) this.smokePuff(s.pos.clone(), s.vel.clone().multiplyScalar(0.1), { size: 6e-3, grow: 0.05, alpha: 0.06, life: 0.5 + R2() * 0.4, drag: 4, grey: 0.62, tint: 1, fadeIn: 0.02 });
       }
       const floor = (Math.abs(s.pos.x + 0.8) < 3 && Math.abs(s.pos.z) < 2.5 ? 0.12 : 0) + s.r;
       if (s.pos.y < floor) {
@@ -2683,6 +2897,7 @@ import * as THREE7 from "three";
 var R3 = {
   dot: { field: 16, color: "#ff2a1a" },
   holo: { field: 96, color: "#ff2a1a" },
+  cdot: { field: 90, color: "#ff2a1a" },
   kobra: { field: 60, color: "#ff2a1a" },
   chevron: { field: 60, color: "#ff3a20" },
   lpvo: { field: 140, color: "#ff2a1a" },
@@ -2720,6 +2935,16 @@ function draw(kind, g, s, col) {
         g.lineTo(c + Math.cos(r) * 29 * u, c + Math.sin(r) * 29 * u);
         g.stroke();
       }
+      g.beginPath();
+      g.arc(c, c, 1.3 * u, 0, 7);
+      g.fill();
+    }, 1.5 * u);
+  } else if (kind === "cdot") {
+    glow(() => {
+      g.lineWidth = 1.3 * u;
+      g.beginPath();
+      g.arc(c, c, 32.5 * u, 0, 7);
+      g.stroke();
       g.beginPath();
       g.arc(c, c, 1.3 * u, 0, 7);
       g.fill();
@@ -2842,7 +3067,7 @@ function reticleTexture(kind) {
 }
 function reticleMesh(kind, sight, ref, dist = 6e4) {
   const field = R3[kind]?.field || 16;
-  const boost = kind === "dot" ? 3.4 : kind === "holo" || kind === "kobra" ? 1.25 : 1;
+  const boost = kind === "dot" ? 3.4 : kind === "holo" || kind === "kobra" || kind === "cdot" ? 1.25 : 1;
   const size = field * 0.2909 * (dist / 1e3) * boost;
   const m = new THREE7.Mesh(new THREE7.PlaneGeometry(size, size), new THREE7.MeshBasicMaterial({
     map: reticleTexture(kind),
@@ -2895,6 +3120,7 @@ function reticleSVG(kind, zoom = 1) {
       <line x1="-170" y1="120" x2="-70" y2="120" stroke="${blk}" stroke-width="1.4"/><path d="${curve}" stroke="${blk}" stroke-width="1.4" fill="none"/>
       ${[2, 4, 6, 8, 10].map((n, i) => `<text x="${-168 + i * 22}" y="136" font-size="10" fill="${blk}">${n}</text>`).join("")}</svg>`;
   }
+  if (kind === "cdot") return `<svg viewBox="-200 -200 400 400"><defs>${glow}</defs><circle r="${65 * zoom}" fill="none" stroke="${red}" stroke-width="2.4" filter="url(#gl)"/><circle r="${2.2 * zoom}" fill="${red}" filter="url(#gl)"/></svg>`;
   if (kind === "holo") return `<svg viewBox="-200 -200 400 400"><defs>${glow}</defs><circle r="${68 * zoom}" fill="none" stroke="${red}" stroke-width="2.6" filter="url(#gl)"/><circle r="${2.2 * zoom}" fill="${red}" filter="url(#gl)"/></svg>`;
   if (kind === "kobra") return `<svg viewBox="-200 -200 400 400"><defs>${glow}</defs><path d="M${-24 * zoom} ${16 * zoom} L0 ${2 * zoom} L${24 * zoom} ${16 * zoom}" stroke="${red}" stroke-width="2.6" fill="none" filter="url(#gl)"/><circle cy="${-6 * zoom}" r="${2.4 * zoom}" fill="${red}" filter="url(#gl)"/></svg>`;
   return `<svg viewBox="-200 -200 400 400"><defs>${glow}</defs><circle r="${Math.max(2.4, 3 * zoom)}" fill="${red}" filter="url(#gl)"/></svg>`;
@@ -3252,6 +3478,7 @@ var clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 var lerp = (a, b, t) => a + (b - a) * t;
 var ease = (t) => t * t * (3 - 2 * t);
 var KICK = { "556": 0.75, "545": 0.7, "762x39": 1.15, "762x51": 1.6 };
+var sightsOf = (info) => info ? [info.sight, ...info.sights || []].filter(Boolean) : [];
 var Tweens = class {
   constructor() {
     this.list = [];
@@ -3351,16 +3578,17 @@ async function boot(def, lib) {
     audio.muzzle = mz ? mz.kind : "bare";
     st.stats = asm.stats();
     for (const it of asm.installed.values()) {
-      const s = it.info?.sight;
-      if (!s || !s.lens || s.lens.userData.stencilSet) continue;
-      const ref = stencilRef++;
-      const m = s.lens.material;
-      m.stencilWrite = true;
-      m.stencilRef = ref;
-      m.stencilFunc = THREE8.AlwaysStencilFunc;
-      m.stencilZPass = THREE8.ReplaceStencilOp;
-      s.lens.userData.stencilSet = true;
-      if (s.reticle) (s.node || it.obj).add(reticleMesh(s.reticle, s, ref));
+      for (const s of sightsOf(it.info)) {
+        if (!s.lens || s.lens.userData.stencilSet) continue;
+        const ref = stencilRef++;
+        const m = s.lens.material;
+        m.stencilWrite = true;
+        m.stencilRef = ref;
+        m.stencilFunc = THREE8.AlwaysStencilFunc;
+        m.stencilZPass = THREE8.ReplaceStencilOp;
+        s.lens.userData.stencilSet = true;
+        if (s.reticle) (s.node || it.obj).add(reticleMesh(s.reticle, s, ref));
+      }
     }
     const hasOptic = !!asm.info("optic")?.sight;
     for (const it of asm.installed.values()) {
@@ -3405,8 +3633,12 @@ async function boot(def, lib) {
       sights.push({ id, label, eye, dir, up, mag: s.mag || 1, zoom: s.zoom, reticle: s.reticle, eyeRelief: s.eyeRelief, magnifier: s.magnifier, x0: eye.x });
     };
     const opt = asm.installed.get("optic");
-    if (opt?.info?.sight) push("optic", opt.part.name, opt.obj, opt.info.sight);
-    for (const it of asm.installed.values()) if (it.slot.id !== "optic" && it.info?.sight && !it.info.sight.magnifier) push(it.slot.id, it.part.name, it.obj, it.info.sight);
+    const pushAll = (id, it) => {
+      if (it.info?.sight && !it.info.sight.magnifier) push(id, it.part.name, it.obj, it.info.sight);
+      (it.info?.sights || []).forEach((s, i2) => push(id + ":" + i2, s.label || it.part.name, it.obj, s));
+    };
+    if (opt) pushAll("optic", opt);
+    for (const it of asm.installed.values()) if (it.slot.id !== "optic") pushAll(it.slot.id, it);
     const mg = asm.installed.get("magnifier");
     if (mg?.info?.sight && sights[0]) {
       m.copy(toRoot(mg.obj, gun));
@@ -3502,7 +3734,10 @@ async function boot(def, lib) {
     const mzInfo = asm.info("muzzle")?.muzzle;
     const kind = mzInfo ? mzInfo.kind : "bare";
     const pos = muzzleWorld(new THREE8.Vector3(), tmp2);
-    fx.muzzleFlash(pos, tmp2.clone(), kind, def.cal === "762x51" ? 1.3 : def.cal === "762x39" ? 1.15 : 1);
+    gun.getWorldQuaternion(tq);
+    const coldCan = kind === "supp" && now - (st.prevShot ?? -10) > 3;
+    st.prevShot = now;
+    fx.muzzleFlash(pos, tmp2.clone(), kind, def.cal === "762x51" ? 1.3 : def.cal === "762x39" ? 1.15 : 1, tq, { flash: mzInfo ? mzInfo.flash ?? 0.8 : 1, first: coldCan });
     const spreadMoa = (st.stats.moa || 1.5) + Math.min(st.burst, 10) * 0.7 * (st.stats.recoilV || 100) / 100 + (st.ads ? 0 : 60);
     const sp = spreadMoa / 60 * D2R2 * 0.5;
     const dir = tmp2.clone();
@@ -3867,7 +4102,13 @@ async function boot(def, lib) {
       focusDist = null;
       return;
     }
-    const box2 = new THREE8.Box3().setFromObject(obj);
+    const box2 = new THREE8.Box3(), mb = new THREE8.Box3();
+    obj.updateWorldMatrix(true, true);
+    obj.traverse((o) => {
+      if (!o.isMesh || o.userData.reticle || !o.geometry) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      box2.union(mb.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld));
+    });
     if (box2.isEmpty()) obj.getWorldPosition(focusTarget);
     else box2.getCenter(focusTarget);
     focusDist = 0.55;
@@ -4408,23 +4649,42 @@ function acog(ctx) {
   for (const x of [-18, 18]) {
     k.add("alu", T(ctx.C.knob(8, 8, 20), { r: [0, 90, 0], p: [x, -2, -13] }));
     k.add("steel", cylZ(3, -13, 16, { seg: 12 }), { p: [x, -2, 0] });
+    k.add("steel", T(cylZ(4.2, 13, 16, { seg: 6 }), { p: [x, -2, 0] }));
   }
-  k.add("alu", extrudeX([[-12, 6], [12, 6], [12, A - 14, 3], [-12, A - 14, 3]], -34, 34, { bevel: 1.2 }));
-  k.add("alu", at(hollowLathe([[-74, 15], [-73, 19.5], [-68, 20.5], [-50, 20.5], [-45, 18.6], [30, 18.6], [44, 21.5], [62, 24.2], [74, 24.2], [75.5, 23]], 16.5, { seg: 40 })));
-  k.add("lensBlack", at(tubeX(16.6, 15.5, -72, 73, { seg: 32 })));
-  k.add("alu", extrudeX([[-8, A + 12, 2], [8, A + 12, 2], [8, A + 23.5, 3], [-8, A + 23.5, 3]], -44, 40, { bevel: 1.5 }));
-  k.add("emGreen", extrudeX([[-2.2, A + 22.5], [2.2, A + 22.5], [2.2, A + 24.2, 1], [-2.2, A + 24.2, 1]], -40, 36, { bevel: 0.3 }));
-  k.add("alu", at(cylY(9.5, 17, 27, { c: 1.4, seg: 28 }), { p: [8, 0, 0] }));
-  k.add("alu", at(cylZ(9.5, 17, 27, { c: 1.4, seg: 28 }), { p: [8, 0, 0] }));
-  const r = ctx.kit();
-  k.add("alu", extrudeX([[-12, A + 23], [12, A + 23], [12, A + 30, 3], [-12, A + 30, 3]], -24, 16, { bevel: 1 }));
-  k.add("alu", extrudeX(shape([[-13, A + 29], [13, A + 29], [13, A + 42, 6], [8, A + 46, 4], [-8, A + 46, 4], [-13, A + 42, 6]], [rrect(0, A + 38, 20, 12, 4)]), -20, 8, { bevel: 1 }));
-  const root = node("acog", [k.build()]);
+  for (const x of [-26, 14]) {
+    k.add("alu", extrudeX([[-12, 6, 1], [12, 6, 1], [11, A - 14, 3], [-11, A - 14, 3]], x, x + 14, { bevel: 1.2 }));
+    for (const s of [-1, 1]) k.add("steel", T(screwHead(2.2, 1), { r: [0, 0, 0], p: [x + 7, 12, s * 12.2] }));
+  }
+  k.add("alu", extrudeX([[-10, 6, 1], [10, 6, 1], [10, 10, 1], [-10, 10, 1]], -26, 28, { bevel: 0.8 }));
+  k.add("alu", at(hollowLathe([[-74, 14.5], [-73, 19.8], [-70, 20.6], [-54, 20.6], [-50, 18.8], [-44, 18.2], [26, 18.2], [36, 20], [54, 23.6], [72, 24.2], [74.5, 23.2]], [[-74, 15.8], [30, 15.8], [74.5, 18]], { seg: 44 })));
+  k.add("rubber", at(tubeX(21.2, 19.8, -76, -68, { seg: 40 })));
+  k.add("alu", at(flutesX(20.6, -66, -56, 36, 1.2, 0.6)));
+  k.add("lensBlack", at(tubeX(15.9, 15.2, -72, 30, { seg: 32 })));
+  k.add("lensBlack", at(tubeX(18.1, 17.4, 30, 73.5, { seg: 32 })));
+  k.add("alu", at(extrudeX(rrect(0, 0, 40, 40, 11), -8, 24, { bevel: 2 })));
+  k.add("alu", at(cylY(10, 19, 29, { c: 1.4, seg: 32 }), { p: [8, 0, 0] }));
+  k.add("alu", at(ringGrooves(10, 20, 27, 3, 0.4, { seg: 32 }), { r: [0, 0, 90], p: [8, 0, 0] }));
+  k.add("alu", at(cylZ(10, 19, 29, { c: 1.4, seg: 32 }), { p: [8, 0, 0] }));
+  k.add("alu", at(ringGrooves(10, 20, 27, 3, 0.4, { seg: 32 }), { r: [0, -90, 0], p: [8, 0, 0] }));
+  k.add("alu", extrudeX([[-9, A + 14, 2], [9, A + 14, 2], [8, A + 23, 3], [-8, A + 23, 3]], -44, 42, { bevel: 1.5 }));
+  k.add("emGreen", extrudeX([[-2.4, A + 22.2], [2.4, A + 22.2], [2.4, A + 24, 1], [-2.4, A + 24, 1]], 10, 38, { bevel: 0.3 }));
+  for (let i = 0; i < 4; i++) k.add("alu", T(box(1.6, 2.4, 7, { bevel: 0.4 }), { p: [14 + i * 7, A + 24.2, 0] }));
+  k.add("alu", extrudeX(rrect(0, A + 24, 25, 2.2, 0.8), -40, 6, { bevel: 0.6 }));
+  for (const x of [-30, -4]) k.add("steel", T(cylY(2.2, A + 25, A + 26.2, { seg: 12 }), { p: [x, 0, 0] }));
+  const rk = ctx.kit();
+  const RA = rmrBody(ctx, rk);
+  const glass = lens(ctx, extrudeX(shape(rrect(0, RA + 0.5, 18.6, 13.4, 5)), 6, 7, { bevel: 0.2 }), "glassAmber");
+  const rmr = node("acogRmr", [rk.build(), glass]);
+  rmr.position.set(-17, A + 25.1, 0);
+  const root = node("acog", [k.build(), rmr]);
   const oc = lens(ctx, at(ctx.C.lensDisc(15.8, -72)), "glassBlue");
-  const ob = lens(ctx, at(ctx.C.lensDisc(17, 73)), "glassAmber");
-  const rmr = lens(ctx, extrudeX(rrect(0, A + 38, 20, 12, 4), 4, 5, { bevel: 0.2 }), "glassBlue");
-  root.add(oc, ob, rmr);
-  return { root, sight: { y: A, z: 0, x0: -74, x1: 75, r: 15, mag: 4, reticle: "chevron", eyeRelief: 38, lens: oc } };
+  const ob = lens(ctx, at(ctx.C.lensDisc(17.8, 73)), "glassAmber");
+  root.add(oc, ob);
+  return {
+    root,
+    sight: { y: A, z: 0, x0: -76, x1: 75, r: 15, mag: 4, reticle: "chevron", eyeRelief: 38, lens: oc },
+    sights: [{ label: "RMR на ACOG", node: rmr, y: RA, z: 0, x0: -22, x1: 15, r: 9, mag: 1, reticle: "dot", lens: glass }]
+  };
 }
 function lpvo(ctx) {
   const k = ctx.kit();
@@ -4591,6 +4851,151 @@ function mbusFront(ctx) {
   flip.children[0].position.set(6, -4, 0);
   return { root: node("mbus_front", [k.build(), flip]), irons: { front: [0, 35.5, 0] }, flip: { node: flip, angle: 90 } };
 }
+function compm4(ctx) {
+  const k = ctx.kit();
+  const A = 39;
+  const at = (g, t = {}) => T(g, { ...t, p: [t.p?.[0] || 0, A + (t.p?.[1] || 0), t.p?.[2] || 0] });
+  k.add("alu", clampBody(-16, 16, 6));
+  k.add("alu", extrudeZ(shape([[-15, 5, 1], [15, 5, 1], [13, A - 17, 3], [-13, A - 17, 3]], [slot(-7, 7, (A - 12) / 2 + 3, 8)]), 20, { bevel: 1.2 }));
+  k.add("alu", at(tubeX(22.4, 19.6, -11, 11, { seg: 44, c: 1.2 })));
+  k.add("alu", extrudeX([[-6, A - 26], [6, A - 26], [6, A - 18], [-6, A - 18]], -11, 11, { bevel: 0.8 }));
+  k.add("alu", T(ctx.C.knob(11, 9, 20), { r: [0, -90, 0], p: [0, -1, 13] }));
+  k.add("steel", cylZ(3.4, -15, 13, { seg: 12 }), { p: [0, -1, 0] });
+  k.add("alu", at(hollowLathe([[-60, 18.8], [-59, 21], [-50, 21], [-48, 19.6], [36, 19.6], [40, 21.6], [58, 21.6], [60, 20.2]], [[-60, 15.2], [60, 17.4]], { seg: 48 })));
+  k.add("rubber", at(tubeX(21.4, 20.2, -58, -50, { seg: 44 })));
+  k.add("lensBlack", at(tubeX(17.5, 16.8, -58, 58, { seg: 32 })));
+  k.add("alu", at(ringGrooves(21.6, 44, 56, 4, 0.5, { seg: 44 })));
+  k.add("alu", at(extrudeX(rrect(0, 0, 34, 34, 9), 8, 30, { bevel: 1.6 })));
+  k.add("alu", at(cylY(9.5, 16, 26, { c: 1.2, seg: 28 }), { p: [19, 0, 0] }));
+  k.add("alu", at(cylZ(9.5, 16, 26, { c: 1.2, seg: 28 }), { p: [19, 0, 0] }));
+  k.add("alu", at(cylX(9.4, 14, 58, { c: 1, seg: 28 }), { p: [0, -21, 0] }));
+  k.add("alu", at(extrudeX([[-7, -19], [7, -19], [7, -12], [-7, -12]], 14, 58, { bevel: 0.8 })));
+  k.add("alu", at(ctx.C.knob(10, 8, 24), { r: [0, 0, -90], p: [58, -21, 0] }));
+  k.add("alu", at(ctx.C.knob(9, 7, 20), { r: [0, 90, 0], p: [-30, 0, -19.5] }));
+  const root = node("compm4", [k.build()]);
+  root.add(lens(ctx, at(ctx.C.lensDisc(15.4, -57)), "glassBlue"));
+  const front = lens(ctx, at(ctx.C.lensDisc(17.4, 57)), "glassRed");
+  root.add(front);
+  return { root, sight: { y: A, z: 0, x0: -60, x1: 60, r: 15, mag: 1, reticle: "dot", lens: front } };
+}
+function xps2(ctx) {
+  const k = ctx.kit();
+  const A = 36;
+  k.add("alu", clampBody(-18, 18, 5.5));
+  k.add("steel", crossBolt(0, -2.5, 13, { nutR: 0 }).slice(0, 1));
+  k.add("steel", T(ctx.C.knob(7, 5, 16), { r: [0, -90, 0], p: [0, -1, 13] }));
+  k.add("alu", extrudeX([[-16, 4.5, 1], [16, 4.5, 1], [16, 13, 3], [-16, 13, 3]], -36, 40, { bevel: 1.2 }));
+  k.add("alu", T(cylZ(9, -16.5, 16.5, { c: 1, seg: 28 }), { p: [30, 13, 0] }));
+  k.add("alu", T(ctx.C.knob(9.3, 5, 22), { r: [0, -90, 0], p: [30, 13, 16.5] }));
+  k.add("alu", extrudeZ([[-36, 5], [-26, 5], [-26, 20, 3], [-36, 17, 2]], 30, { bevel: 1.2 }));
+  for (const y of [9, 15]) k.add("rubber", T(box(3, 4.6, 12, { bevel: 0.8 }), { p: [-36.5, y, 0] }));
+  const arch = (w, cy, h0) => {
+    const pts = [[-w, h0], [w, h0]];
+    for (let i = 0; i <= 16; i++) {
+      const a = i / 16 * Math.PI;
+      pts.push([Math.cos(a) * w, cy + Math.sin(a) * w]);
+    }
+    return pts;
+  };
+  k.add("alu", extrudeX(shape(arch(21, A + 2, 11), [arch(15.6, A + 2, 19.6)]), -22, 24, { bevel: 1.2 }));
+  k.add("alu", extrudeX([[-21, 11], [21, 11], [21, 20], [-21, 20]], -22, 24, { bevel: 0.8 }));
+  for (const s of [-1, 1]) k.add("steel", T(cylZ(2.2, 0, 1.2, { seg: 12 }), { p: [16, A - 8, s * 21] }));
+  const root = node("xps2", [k.build()]);
+  const rp = rrect(0, A - 1, 28, 26, 7);
+  root.add(lens(ctx, extrudeX(rp, -14, -12.8, { bevel: 0.2 }), "glassBlue"));
+  const front = lens(ctx, extrudeX(rp, 16, 17.2, { bevel: 0.2 }), "glassAmber");
+  root.add(front);
+  return { root, sight: { y: A, z: 0, x0: -14, x1: 17, r: 13, mag: 1, reticle: "holo", lens: front } };
+}
+function hs510c(ctx) {
+  const k = ctx.kit();
+  const A = 36;
+  k.add("alu", clampBody(-20, 22, 5));
+  k.add("steel", qdLever(-16, 14, -1));
+  k.add("steel", crossBolt(0, -2.5, 13, { nutR: 0 }).slice(0, 1));
+  k.add("alu", extrudeX([[-17, 4, 1], [17, 4, 1], [17, 12, 2], [-17, 12, 2]], -34, 32, { bevel: 1.2 }));
+  k.add("alu", extrudeZ([[-34, 10], [-8, 10], [-8, 15, 2], [-14, 18, 3], [-34, 17, 3]], 32, { bevel: 1.5 }));
+  k.add("lensBlack", T(box(16, 0.8, 22, { bevel: 0.3 }), { p: [-22, 17.8, 0], r: [0, 0, -4] }));
+  for (const x of [-28, -18]) k.add("rubber", T(cylZ(2.6, -17.8, -16, { c: 0.6, seg: 16 }), { p: [x, 13.5, 0] }));
+  k.add("steel", T(cylY(2.4, 16.5, 18, { seg: 14 }), { p: [-10, 0, 8] }));
+  k.add("steel", T(cylZ(2.4, 16, 17.6, { seg: 14 }), { p: [-12, 13.5, 0] }));
+  const frame = shape([[-20, 10, 2], [20, 10, 2], [20, A + 13, 8], [-20, A + 13, 8]], [rrect(0, A, 32, 26, 6)]);
+  k.add("alu", extrudeX(frame, 14, 24, { bevel: 1.4 }));
+  k.add("alu", extrudeX(shape([[-20, A + 8, 3], [20, A + 8, 3], [20, A + 13, 4], [-20, A + 13, 4]]), -8, 20, { bevel: 1.2 }));
+  const cheek = shape([[-8, 10, 1], [24, 10, 1], [24, A + 13, 3], [-8, A + 13, 3]], [[[-2, 22, 3], [16, 22, 3], [16, A + 6, 4], [2, A + 6, 4]]]);
+  for (const s of [-1, 1]) k.add("alu", extrudeZ(cheek, 3.4, { bevel: 0.8, z: s * 18.3 }));
+  const root = node("hs510c", [k.build()]);
+  const win = lens(ctx, extrudeX(shape(rrect(0, A, 32, 26, 6)), 17.4, 18.4, { bevel: 0.2 }), "glassBlue");
+  root.add(win);
+  return { root, sight: { y: A, z: 0, x0: -8, x1: 18, r: 13, mag: 1, reticle: "cdot", lens: win } };
+}
+function mro(ctx) {
+  const k = ctx.kit();
+  const A = 39;
+  const at = (g, t = {}) => T(g, { ...t, p: [t.p?.[0] || 0, A + (t.p?.[1] || 0), t.p?.[2] || 0] });
+  k.add("alu", clampBody(-18, 18, 5.5));
+  k.add("alu", extrudeZ(shape([[-17, 5], [17, 5], [15, A - 13, 3], [-15, A - 13, 3]], [slot(-8, 8, (A - 8) / 2 + 3, 9)]), 18, { bevel: 1.2 }));
+  k.add("steel", crossBolt(0));
+  k.add("alu", at(hollowLathe([[-30, 15], [-29, 16.6], [-10, 16.6], [18, 19.6], [30, 20.2], [32, 19.2]], [[-30, 12.4], [32, 16.8]], { seg: 44 })));
+  k.add("lensBlack", at(tubeX(16.9, 16.2, 10, 31, { seg: 32 })));
+  k.add("lensBlack", at(tubeX(12.5, 11.8, -29, 10, { seg: 32 })));
+  k.add("alu", extrudeX([[-12, A - 16, 2], [12, A - 16, 2], [12, A - 10], [-12, A - 10]], -16, 16, { bevel: 1 }));
+  k.add("alu", at(ctx.C.knob(8.5, 6, 26), { r: [0, 0, 90], p: [-14, 14.5, -6] }));
+  k.add("alu", at(cylY(6.5, 15, 20, { c: 0.8, seg: 20 }), { p: [6, 0, 5] }));
+  k.add("alu", at(cylZ(6.5, 15, 20, { c: 0.8, seg: 20 }), { p: [6, 0, 0] }));
+  const root = node("mro", [k.build()]);
+  root.add(lens(ctx, at(ctx.C.lensDisc(12.6, -28.5)), "glassBlue"));
+  const front = lens(ctx, at(ctx.C.lensDisc(17, 30.5)), "glassRed");
+  root.add(front);
+  return { root, sight: { y: A, z: 0, x0: -30, x1: 32, r: 12, mag: 1, reticle: "dot", lens: front } };
+}
+function rmrRiser(ctx) {
+  const k = ctx.kit(), m = ctx.kit();
+  const H = 24;
+  k.add("alu", clampBody(-17, 17, 5, { w: 25 }));
+  k.add("steel", crossBolt(-8));
+  k.add("steel", crossBolt(8));
+  k.add("alu", extrudeZ(shape([[-18, 4, 1], [18, 4, 1], [17, H, 1.5], [-17, H, 1.5]], [slot(-10, 10, H / 2 + 2, 8)]), 24, { bevel: 1 }));
+  k.add("alu", extrudeX(rrect(0, H - 1.5, 26, 3, 1), -22, 22, { bevel: 0.6 }));
+  const A = rmrBody(ctx, m);
+  const glass = lens(ctx, extrudeX(shape(rrect(0, A + 0.5, 18.6, 13.4, 5)), 6, 7, { bevel: 0.2 }), "glassAmber");
+  const body = node("rmr", [m.build(), glass]);
+  body.position.set(-3, H, 0);
+  return { root: node("rmr_riser", [k.build(), body]), sight: { node: body, y: A, z: 0, x0: -22, x1: 15, r: 9, mag: 1, reticle: "dot", lens: glass } };
+}
+function pk120(ctx) {
+  const k = ctx.kit();
+  const A = 40;
+  k.add("alu", clampBody(-24, 24, 6));
+  k.add("steel", crossBolt(-10));
+  k.add("steel", T(ctx.C.knob(8, 7, 18), { r: [0, -90, 0], p: [12, -1, 13] }));
+  k.add("alu", extrudeX([[-15, 5, 1], [15, 5, 1], [15, A - 16, 2], [-15, A - 16, 2]], -30, 30, { bevel: 1.2 }));
+  const oct = (w, h, c, cy) => [[-w + c, cy - h], [w - c, cy - h], [w, cy - h + c], [w, cy + h - c], [w - c, cy + h], [-w + c, cy + h], [-w, cy + h - c], [-w, cy - h + c]];
+  k.add("alu", extrudeX(shape(oct(20, 17, 6, A), [oct(16, 13, 5, A)]), -34, 34, { bevel: 1.2 }));
+  k.add("alu", extrudeX(shape(oct(21, 18, 6.5, A), [oct(16.5, 13.5, 5, A)]), 26, 36, { bevel: 1 }));
+  k.add("alu", T(cylX(7.5, -30, 6, { c: 1, seg: 24 }), { p: [0, A - 4, 24] }));
+  k.add("alu", T(ctx.C.knob(7.8, 5, 18), { r: [0, 180, 0], p: [-30, A - 4, 24] }));
+  k.add("alu", T(ctx.C.knob(9, 7, 22), { r: [0, 90, 0], p: [-18, A - 6, -20] }));
+  const root = node("pk120", [k.build()]);
+  const win = lens(ctx, extrudeX(shape(oct(16, 13, 5, A)), 24, 25, { bevel: 0.2 }), "glassRed");
+  root.add(win);
+  return { root, sight: { y: A, z: 0, x0: -34, x1: 36, r: 12, mag: 1, reticle: "dot", lens: win } };
+}
+function okp7(ctx) {
+  const k = ctx.kit();
+  const Y = 50, Z = 19;
+  k.add("steel", extrudeX(shape([[-3, -9, 1], [4, -9], [4, 9], [-3, 9, 1], [-11, 7, 2], [-11, -7, 2]]), -46, 46, { bevel: 0.8 }));
+  k.add("steel", T(ctx.C.knob(7, 6, 18), { r: [0, 90, 0], p: [-26, 0, -11] }));
+  k.add("alu", extrudeX(shape([[-11, 6, 2], [4, 6, 2], [Z - 6, Y - 18, 3], [Z - 10, Y - 12, 3], [-11, 20, 2]]), -44, 44, { bevel: 1.4 }));
+  const trap = (w0, w1, y0, y1) => [[Z - w0, y0, 2], [Z + w0, y0, 2], [Z + w1, y1, 5], [Z - w1, y1, 5]];
+  k.add("alu", extrudeX(shape(trap(22, 17, Y - 17, Y + 15), [trap(17.5, 13.5, Y - 13, Y + 11.5)]), -48, 40, { bevel: 1.4 }));
+  k.add("alu", extrudeX([[Z - 18, Y - 22, 2], [Z + 18, Y - 22, 2], [Z + 18, Y - 16], [Z - 18, Y - 16]], -48, -8, { bevel: 1 }));
+  k.add("alu", T(ctx.C.knob(8, 6, 20), { r: [0, -90, 0], p: [-30, Y - 6, Z + 21] }));
+  const root = node("okp7", [k.build()]);
+  const win = lens(ctx, extrudeX(shape(trap(17.5, 13.5, Y - 13, Y + 11.5)), 30, 31, { bevel: 0.2 }), "glassAmber");
+  root.add(win);
+  return { root, sight: { y: Y - 1, z: Z, x0: -48, x1: 31, r: 12, mag: 1, reticle: "dot", lens: win } };
+}
 var mag1x39 = (cfg, asm) => {
   const it = asm.installed.get("optic");
   const s = it?.info?.sight;
@@ -4600,7 +5005,14 @@ var OPTICS = [
   { id: "t2_low", cat: "optic", name: "Aimpoint Micro T-2", desc: "Коллиматор, низкое крепление (ось 20 мм). Для высоких планок АК", foot: [-18, 18], body: [-38, 38], stats: { weight: 135, ergo: -1, adsTime: 8 }, build: (c) => t2(c, 20) },
   { id: "t2_lrp", cat: "optic", name: "Aimpoint T-2 + LRP 39 мм", desc: "Коллиматор на кронштейне, нижняя треть с механикой AR", foot: [-18, 18], body: [-38, 38], stats: { weight: 190, ergo: -1, adsTime: 10 }, build: (c) => t2(c, 39) },
   { id: "exps3", cat: "optic", name: "EOTech EXPS3", desc: "Голографический, кольцо 68 MOA с точкой", foot: [-22, 22], body: [-48, 46], stats: { weight: 320, ergo: -3, adsTime: 14 }, build: exps3 },
-  { id: "acog", cat: "optic", name: "Trijicon ACOG TA31 4×32", desc: "Призменный 4×, шеврон с дальномерной шкалой", foot: [-32, 32], body: [-75, 76], stats: { weight: 480, ergo: -6, adsTime: 40 }, build: acog },
+  { id: "compm4", cat: "optic", name: "Aimpoint CompM4s", desc: "Армейский коллиматор, точка 2 MOA, батарея АА на 8 лет", foot: [-16, 16], body: [-62, 62], stats: { weight: 380, ergo: -3, adsTime: 14 }, build: compm4 },
+  { id: "mro", cat: "optic", name: "Trijicon MRO", desc: "Компактный коллиматор с широким полем зрения, точка 2 MOA", foot: [-18, 18], body: [-31, 33], stats: { weight: 170, ergo: -1, adsTime: 9 }, build: mro },
+  { id: "rmr_riser", cat: "optic", name: "Trijicon RMR на райзере Unity", desc: "Мини-коллиматор открытого типа, самый лёгкий", foot: [-17, 17], body: [-25, 22], stats: { weight: 90, ergo: 0, adsTime: 6 }, build: rmrRiser },
+  { id: "hs510c", cat: "optic", name: "Holosun HS510C", desc: "Открытый коллиматор: кольцо 65 MOA + точка, солнечная панель", foot: [-20, 22], body: [-34, 32], stats: { weight: 245, ergo: -1, adsTime: 8 }, build: hs510c },
+  { id: "xps2", cat: "optic", name: "EOTech XPS2-0", desc: "Короткий голографический, абсолютное совмещение с механикой", foot: [-18, 18], body: [-37, 40], stats: { weight: 255, ergo: -2, adsTime: 11 }, build: xps2 },
+  { id: "pk120", cat: "optic", name: "ПК-120 (БелОМО)", desc: "Коллиматор в защищённом кожухе-тоннеле", foot: [-24, 24], body: [-40, 37], stats: { weight: 310, ergo: -2, adsTime: 12 }, build: pk120 },
+  { id: "okp7d", cat: "optic", name: "ОКП-7Д «Валдай»", desc: "Низкий коллиматор на боковую планку АК, окно над крышкой", mountTypes: ["dovetail"], only: ["akm", "ak74"], foot: [-46, 46], body: [-48, 46], needs: (cfg) => !cfg.sidemount, stats: { weight: 290, ergo: -2, adsTime: 11 }, build: okp7 },
+  { id: "acog", cat: "optic", name: "Trijicon ACOG TA31RMR 4×32", desc: "Призменный 4×, шеврон со шкалой + RMR сверху для ближнего боя (V — переключить)", foot: [-32, 32], body: [-77, 76], stats: { weight: 530, ergo: -6, adsTime: 40 }, build: acog },
   { id: "lpvo", cat: "optic", name: "Прицел 1–6×24", desc: "Переменная кратность, колёсико — зум в прицеле", foot: [-38, 34], body: [-132, 106], stats: { weight: 720, ergo: -9, adsTime: 55 }, build: lpvo },
   { id: "mag3x", cat: "magnifier", name: "Aimpoint 3XMag-1 + FTS", desc: "Увеличитель 3×, откидывается вбок", foot: [-16, 16], body: [-57, 55], needs: mag1x39, stats: { weight: 330, ergo: -4, adsTime: 20 }, build: magnifier },
   { id: "pvs14", cat: "magnifier", name: "Монокуляр AN/PVS-14", desc: "ПНВ за коллиматором на откидном кронштейне (N — откинуть)", foot: [-16, 16], body: [-86, 60], needs: mag1x39, stats: { weight: 420, ergo: -6, adsTime: 25 }, build: pvs14 },
@@ -4656,8 +5068,37 @@ function brake(ctx, R4) {
   k.add("steel", flutesX(R4, 2, 10, 2, 6, 0.5, { a0: 90 }));
   return { root: k.build("brake"), muzzle: { x: 57, kind: "brake", flash: 0.7 } };
 }
+function rotexV(ctx) {
+  const k = ctx.kit();
+  const R4 = 20, L = 158;
+  k.add("steel", latheX([[0, 0], [0, 10.4], [1, 11], [16, 11], [17, 10], [17, 0]], { seg: 28 }));
+  k.add("steelPark", latheX([[8, 0], [8, 15.2], [10, 17], [34, 17], [35, 18.6], [38, R4 - 0.3], [L - 10, R4], [L - 5, R4 - 1], [L - 1.5, R4 - 3.6], [L, R4 - 5], [L, 5.2], [L - 3, 4.6], [L - 3, 0]], { seg: 52, crease: 30 }));
+  k.add("steelPark", flutesX(17.3, 12, 32, 36, 1.6, 0.9));
+  k.add("steel", ringGrooves(R4, 42, 46, 2, 0.35, { seg: 48 }));
+  k.add("steel", ringGrooves(R4, L - 18, L - 14, 2, 0.35, { seg: 48 }));
+  k.add("steel", T(box(10, 3, 6, { bevel: 0.8 }), { p: [22, -17.8, 0] }));
+  k.add("lensBlack", cylX(5, L - 3.2, L + 0.05, { seg: 20 }));
+  return { root: k.build("rotex"), muzzle: { x: L, kind: "supp", flash: 0.03 } };
+}
+function nt4(ctx) {
+  const k = ctx.kit();
+  const R4 = 19.05, L = 168;
+  k.add("steel", latheX([[0, 0], [0, 10.4], [1, 11], [14, 11], [15, 10], [15, 0]], { seg: 28 }));
+  k.add("cast", latheX([[6, 0], [6, 14.5], [8, 16.5], [30, 16.5], [34, R4 - 0.4], [L - 14, R4], [L - 6, R4 - 2], [L - 2, R4 - 5.5], [L, R4 - 8], [L, 4.8], [L - 2, 4.4], [L - 2, 0]], { seg: 52, crease: 30 }));
+  k.add("cast", flutesX(16.7, 10, 28, 24, 2, 1.1));
+  k.add("steel", T(extrudeZ([[0, -3, 1], [26, -2.4, 1.5], [28, 0, 1], [26, 2.4, 1.5], [0, 3, 1]], 2.6, { bevel: 0.6 }), { p: [8, 0, 17.6] }));
+  k.add("steel", T(cylZ(3, 15.5, 19.4, { seg: 14 }), { p: [10, 0, 0] }));
+  for (let i = 0; i < 8; i++) {
+    const a = i / 8 * Math.PI * 2;
+    k.add("lensBlack", T(cylX(1.3, L - 4, L + 0.05, { seg: 10 }), { p: [0, Math.cos(a) * 8, Math.sin(a) * 8] }));
+  }
+  k.add("lensBlack", cylX(4.6, L - 2.2, L + 0.05, { seg: 20 }));
+  return { root: k.build("nt4"), muzzle: { x: L, kind: "supp", flash: 0.03 } };
+}
 var MUZZLES = [
   { id: "sf_socom556", cat: "muzzle", name: "SureFire SOCOM556-RC2", desc: "Глушитель 5,56, быстросъёмный", fit: { thread: ["1/2x28"] }, stats: { weight: 620, length: 168, loud: -28, flash: -70, "recoilV%": -10, ergo: -8, adsTime: 25, velocity: 6 }, build: (c) => socom(c, { len: 168 }) },
+  { id: "bt_rotex_hk", cat: "muzzle", only: ["m416"], name: "B&T Rotex-V (HK416)", desc: "Штатный глушитель к HK416: ставится на пламегаситель HK, стопорное кольцо", fit: { thread: ["1/2x28"] }, stats: { weight: 560, length: 158, loud: -29, flash: -72, "recoilV%": -11, ergo: -7, adsTime: 22, velocity: 5 }, build: rotexV },
+  { id: "kac_nt4", cat: "muzzle", only: ["m416"], name: "Knight's Armament NT4 QDSS", desc: "Глушитель M27 IAR (USMC, база HK416): быстросъёмный, рычаг-защёлка", fit: { thread: ["1/2x28"] }, stats: { weight: 640, length: 168, loud: -30, flash: -75, "recoilV%": -12, ergo: -8, adsTime: 25, velocity: 6 }, build: nt4 },
   { id: "sf_socom762", cat: "muzzle", name: "SureFire SOCOM762-RC2", desc: "Глушитель 7,62, быстросъёмный", fit: { thread: ["5/8x24"] }, stats: { weight: 720, length: 188, loud: -27, flash: -70, "recoilV%": -12, ergo: -10, adsTime: 30, velocity: 6 }, build: (c) => socom(c, { len: 188 }) },
   { id: "a2_fh", cat: "muzzle", name: "Пламегаситель A2", desc: "Классическая «птичья клетка»", fit: { thread: ["1/2x28"] }, stats: { weight: 50, length: 34, flash: -35, "recoilV%": -3 }, build: a2 },
   { id: "warcomp556", cat: "muzzle", name: "SureFire WarComp 5,56", desc: "Пламегаситель-компенсатор", fit: { thread: ["1/2x28"] }, stats: { weight: 90, length: 49, flash: -45, "recoilV%": -8, "recoilH%": -6, loud: 1 }, build: (c) => warcomp(c, 11) },
@@ -4824,15 +5265,12 @@ function grip(ctx, o) {
   const sh = (y) => -Math.tan(a) * -y;
   const front = o.front.map(([f, y]) => [sh(y) + f, y]);
   const back = o.back.map(([f, y]) => [sh(y) + f, y]);
-  const pts = [...front.map((p) => [...p, 3]), ...back.reverse().map((p) => [...p, 4])];
-  pts[0][2] = 0;
-  pts[pts.length - 1][2] = 0;
-  k.add(o.mat || "poly", extrudeZ(pts, o.w ?? 30, { bevel: o.bevel ?? 6, curve: 6 }));
+  k.add(o.mat || "poly", gripLoft(front, back, { w: o.w ?? 30, width: (t) => 0.86 + 0.14 * Math.sin(Math.PI * Math.min(1, t * 1.6)) }));
   if (o.texture !== false) {
     const tx = [];
-    for (let i = 0; i < 8; i++) {
-      const y = -22 - i * 9;
-      for (const s of [-1, 1]) tx.push(T(box(26, 1.4, 1, { bevel: 0.3 }), { p: [sh(y) - 18, y, s * ((o.w ?? 30) / 2 - 0.3)], r: [0, 0, 20] }));
+    for (let i = 0; i < 9; i++) {
+      const y = -24 - i * 8.5;
+      for (const s of [-1, 1]) tx.push(T(box(16, 1.1, 1.2, { bevel: 0.3 }), { p: [sh(y) - 22, y, s * ((o.w ?? 30) / 2 * 0.9 - 0.2)], r: [0, 0, o.angle ?? 20] }));
     }
     k.add(o.mat || "poly", tx);
   }
@@ -5314,14 +5752,14 @@ function akGrip(ctx, o) {
   const k = ctx.kit();
   const a = (o.angle ?? 18) * Math.PI / 180;
   const sh = (y) => Math.tan(a) * y;
-  const front = o.front.map(([f, y]) => [sh(y) + f, y, 3]);
-  const back = o.back.map(([f, y]) => [sh(y) + f, y, 4]).reverse();
-  k.add(o.mat, extrudeZ([...front, ...back], o.w ?? 30, { bevel: o.bevel ?? 7, curve: 8 }));
+  const front = o.front.map(([f, y]) => [sh(y) + f, y]);
+  const back = o.back.map(([f, y]) => [sh(y) + f, y]);
+  const W = o.w ?? 30;
+  k.add(o.mat, gripLoft(front, back, { w: W, k: 2.8, taper: 0.22, width: (t) => 0.9 + 0.1 * Math.sin(Math.PI * t) }));
   if (o.grooves) for (let i = 0; i < o.grooves; i++) for (const s of [-1, 1]) {
-    const y = -18 - i * (70 / o.grooves);
-    k.add(o.mat, T(box(1.4, 62, 1.2, { bevel: 0.4 }), { p: [sh(-55) - 8 - i * 3.4, -55, s * ((o.w ?? 28) / 2 - 0.4)], r: [0, 0, -o.angle] }));
+    k.add(o.mat, T(box(1.6, 58, 1.2, { bevel: 0.5 }), { p: [sh(-52) - 9 - i * 3.3, -52, s * (W / 2 * 0.93 - 0.3)], r: [0, 0, -o.angle] }));
   }
-  if (o.texture) for (let i = 0; i < 9; i++) for (const s of [-1, 1]) k.add(o.mat, T(box(24, 1.3, 1, { bevel: 0.3 }), { p: [sh(-20 - i * 8.5) - 16, -20 - i * 8.5, s * ((o.w ?? 28) / 2 - 0.3)], r: [0, 0, o.angle] }));
+  if (o.texture) for (let i = 0; i < 9; i++) for (const s of [-1, 1]) k.add(o.mat, T(box(16, 1.2, 1.1, { bevel: 0.3 }), { p: [sh(-20 - i * 8.5) - 20, -20 - i * 8.5, s * (W / 2 * 0.9 - 0.2)], r: [0, 0, o.angle] }));
   if (o.cap) k.add("polySoft", T(box(34, 5, (o.w ?? 28) - 4, { bevel: 2 }), { p: [sh(-o.h) - 16, -o.h - 1, 0] }));
   k.add("steel", T(cylY(3, -o.h - 2, -o.h + 1, { seg: 12 }), { p: [sh(-o.h) - 14, 0, 0] }));
   return { root: k.build("pgrip") };

@@ -130,44 +130,6 @@ export class GunAudio {
     if (wet > 0) { const w = this.ctx.createGain(); w.gain.value = wet; n.connect(w).connect(this.verb); }
   }
 
-  // Щелчок/лязг металла: полосовой шум + затухающие моды.
-  clank(t, f, level, dur = 0.05, q = 6, modes = 2, pan = 0.1, wet = 0.08) {
-    const c = this.ctx;
-    const s = this.src(this.noise, t, dur + 0.02, 1);
-    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
-    const g = c.createGain(); this.env(g, t, 0.0008, level, dur * 0.3, dur + 0.02);
-    s.connect(bp).connect(g);
-    this.out(g, wet, pan);
-    for (let i = 0; i < modes; i++) {
-      const o = c.createOscillator(); o.type = 'sine';
-      o.frequency.value = f * (1 + i * 1.73) * (0.97 + Math.random() * 0.06);
-      const og = c.createGain(); this.env(og, t, 0.0005, level * 0.18 / (i + 1), dur * 0.5, dur * 3);
-      o.connect(og); this.out(og, wet, pan);
-      o.start(t); o.stop(t + dur * 3 + 0.05);
-    }
-  }
-
-  // Глухой удар (пластик, ладонь).
-  thud(t, f, level, dur = 0.06, pan = 0) {
-    const c = this.ctx;
-    const s = this.src(this.pink, t, dur + 0.02);
-    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = f;
-    const g = c.createGain(); this.env(g, t, 0.001, level, dur * 0.35, dur + 0.02);
-    s.connect(lp).connect(g);
-    this.out(g, 0.05, pan);
-  }
-
-  // Шорох/скольжение (затвор, магазин в шахте).
-  slide(t, f0, f1, level, dur, pan = 0.1) {
-    const c = this.ctx;
-    const s = this.src(this.noise, t, dur + 0.02);
-    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 2.5;
-    bp.frequency.setValueAtTime(f0, t); bp.frequency.exponentialRampToValueAtTime(f1, t + dur);
-    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(level, t + dur * 0.3); g.gain.linearRampToValueAtTime(0.0001, t + dur);
-    s.connect(bp).connect(g);
-    this.out(g, 0.03, pan);
-  }
-
   /* --------------------------------------------------------------- выстрел */
 
   shot(o = {}) {
@@ -228,14 +190,10 @@ export class GunAudio {
       this.out(g, 0.25);
       s.start(t + 0.002);
     }
-    // 4) механика: отпирание, удар рамы в крайнем заднем, накат и запирание
+    // 4) механика: отпирание, удар рамы в буфер, накат и запирание (синтез ударов, foley.js)
     {
-      const mech = (this.profile.mech ?? 0.8) * (this.muzzle === 'supp' ? 1.25 : 1);
-      const cyc = 60 / (this.profile.rpm || 700);
-      this.clank(t + 0.003, P.mechF, 0.22 * mech, 0.03, 5, 2, 0.15, 0.05);
-      this.clank(t + cyc * 0.45, P.mechF * 0.8, 0.16 * mech, 0.035, 4, 2, 0.15, 0.05);
-      this.clank(t + cyc * 0.85, P.mechF * 1.15, 0.28 * mech, 0.04, 6, 3, 0.12, 0.06);
-      if (this.profile.cal === '762x39' || this.profile.cal === '545') this.clank(t + cyc * 0.9, P.mechF * 0.55, 0.12 * mech, 0.05, 3, 1, 0.1);
+      const mech = (this.profile.mech ?? 0.8) * (this.muzzle === 'supp' ? 1.3 : 1);
+      this.play('cycle', { gain: 0.32 * mech, delay: 0.004, wet: 0.05, pan: 0.15 });
     }
     // 5) эхо от вала — поздний приглушённый повтор
     if (this.muzzle !== 'supp') {
@@ -254,7 +212,7 @@ export class GunAudio {
     if (!this.foley) this.foley = new Foley(c);
     const P = this.profile;
     const s = c.createBufferSource();
-    s.buffer = this.foley.buffer(name, { fam: P.family, cal: P.cal, kind: o.kind });
+    s.buffer = this.foley.buffer(name, { fam: P.family, cal: P.cal, kind: o.kind, rpm: name === 'cycle' ? P.rpm : undefined });
     s.playbackRate.value = 0.96 + Math.random() * 0.08;
     const g = c.createGain(); g.gain.value = (o.gain ?? 1) * 0.9;
     s.connect(g);
@@ -279,37 +237,33 @@ export class GunAudio {
     const P = this.profile, o = { fam: P.family, cal: P.cal };
     for (const n of ['magOut', 'magInsert', 'magIn', 'magGround']) for (const kind of ['steel', 'poly']) this.foley.buffer(n, { ...o, kind });
     for (const n of ['chargeBack', 'chargeRelease', 'boltCatch', 'dryFire', 'selector', 'click']) this.foley.buffer(n, o);
+    this.foley.buffer('cycle', { ...o, rpm: P.rpm });
+    for (const kind of ['steel', 'poly']) this.foley.buffer('tick', { ...o, kind });
+    for (const kind of ['steel', 'brass']) this.foley.buffer('casing', { ...o, kind });
   }
 
   // Установка модуля: щелчки прижима или храповик резьбы.
   attach(kind) {
     if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
     if (kind === 'thread' || kind === 'supp') {
-      for (let i = 0; i < 7; i++) this.clank(t + i * 0.055, 3600 + Math.random() * 400, 0.1, 0.012, 9, 1, 0);
-      this.clank(t + 0.42, 2300, 0.2, 0.04, 5, 2, 0);
+      for (let i = 0; i < 6; i++) this.play('tick', { kind: 'steel', gain: 0.25 + Math.random() * 0.1, delay: i * 0.06 + Math.random() * 0.01, pan: 0 });
+      this.play('tick', { kind: 'steel', gain: 0.6, delay: 0.42, pan: 0 });
     } else if (kind === 'poly') {
-      this.thud(t, 1400, 0.25, 0.04);
-      this.clank(t + 0.03, 3000, 0.1, 0.02, 6, 1, 0);
+      this.play('tick', { kind: 'poly', gain: 0.6, pan: 0 });
+      this.play('tick', { kind: 'steel', gain: 0.25, delay: 0.03, pan: 0 });
     } else {
-      this.clank(t, 2600, 0.2, 0.03, 5, 2, 0);
-      this.clank(t + 0.09, 3900, 0.14, 0.02, 8, 1, 0);
-      this.slide(t + 0.12, 3000, 5000, 0.05, 0.08, 0);
+      this.play('tick', { kind: 'steel', gain: 0.55, pan: 0 });
+      this.play('tick', { kind: 'steel', gain: 0.35, delay: 0.09, pan: 0 });
     }
   }
 
-  fold() { if (!this.ctx || this.muted) return; const t = this.ctx.currentTime; this.clank(t, 2400, 0.22, 0.03, 5, 2, 0.1); this.clank(t + 0.22, 1900, 0.35, 0.05, 4, 2, 0.1); }
-  bipod() { if (!this.ctx || this.muted) return; const t = this.ctx.currentTime; this.slide(t, 1500, 3000, 0.08, 0.12); this.clank(t + 0.12, 2100, 0.3, 0.05, 4, 3, 0); this.clank(t + 0.15, 2300, 0.25, 0.05, 4, 3, 0); }
+  fold() { this.play('tick', { kind: 'steel', gain: 0.5 }); this.play('tick', { kind: 'steel', gain: 0.8, delay: 0.22 }); }
+  bipod() { this.play('tick', { kind: 'steel', gain: 0.6, delay: 0.12, pan: 0 }); this.play('tick', { kind: 'steel', gain: 0.5, delay: 0.15, pan: 0 }); }
 
   // Гильза падает на бетон/землю.
   casing(delay = 0.5, steel = false, vol = 1) {
     if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime + delay;
-    const f = steel ? 3600 : 5600;
-    const pan = 0.35 + Math.random() * 0.3;
-    this.clank(t, f * (0.9 + Math.random() * 0.2), 0.08 * vol, 0.05, 12, 3, pan, 0.1);
-    this.clank(t + 0.07 + Math.random() * 0.05, f * 1.1 * (0.9 + Math.random() * 0.2), 0.04 * vol, 0.04, 12, 2, pan, 0.1);
-    this.clank(t + 0.16 + Math.random() * 0.08, f * 0.95, 0.02 * vol, 0.03, 12, 1, pan, 0.1);
+    this.play('casing', { kind: steel ? 'steel' : 'brass', gain: 0.22 * vol, delay, pan: 0.35 + Math.random() * 0.3, wet: 0.1 });
   }
 
   // Попадание в стальную мишень: звон, приходит с задержкой по дальности.

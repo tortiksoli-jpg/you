@@ -82,38 +82,64 @@ function exps3(ctx) {
   return { root, sight: { y: A, z: 0, x0: -14, x1: 37, r: 14, mag: 1, reticle: 'holo', lens: front } };
 }
 
-/* ----------------------------------------------------- Trijicon ACOG TA31 */
+/* ------------------------------------------ Trijicon ACOG TA31RMR 4×32 */
 
+// Корпус TA31 — кованый: круглый окуляр, «плечи» под барабанами, раструб объектива 32 мм.
+// Сверху — световод (подсветка шеврона) и мини-коллиматор RMR на штатной площадке:
+// через него можно целиться (V — переключить прицел), ось RMR на 38 мм выше оси ACOG.
 function acog(ctx) {
   const k = ctx.kit();
   const A = 38;
   const at = (g, t = {}) => G.T(g, { ...t, p: [(t.p?.[0] || 0), A + (t.p?.[1] || 0), t.p?.[2] || 0] });
-  // кронштейн TA51: плоское основание и два барашка слева
+  // кронштейн TA51: плоское основание, два барашка слева
   k.add('alu', clampBody(-32, 32, 7));
   for (const x of [-18, 18]) {
     k.add('alu', G.T(ctx.C.knob(8, 8, 20), { r: [0, 90, 0], p: [x, -2, -13] }));
     k.add('steel', G.cylZ(3, -13, 16, { seg: 12 }), { p: [x, -2, 0] });
+    k.add('steel', G.T(G.cylZ(4.2, 13, 16, { seg: 6 }), { p: [x, -2, 0] }));
   }
-  k.add('alu', G.extrudeX([[-12, 6], [12, 6], [12, A - 14, 3], [-12, A - 14, 3]], -34, 34, { bevel: 1.2 }));
-  // корпус: объектив 32 мм, сужение, окуляр
-  k.add('alu', at(hollowLathe([[-74, 15], [-73, 19.5], [-68, 20.5], [-50, 20.5], [-45, 18.6], [30, 18.6], [44, 21.5], [62, 24.2], [74, 24.2], [75.5, 23]], 16.5, { seg: 40 })));
-  k.add('lensBlack', at(G.tubeX(16.6, 15.5, -72, 73, { seg: 32 })));
-  // верхний гребень со световодом
-  k.add('alu', G.extrudeX([[-8, A + 12, 2], [8, A + 12, 2], [8, A + 23.5, 3], [-8, A + 23.5, 3]], -44, 40, { bevel: 1.5 }));
-  k.add('emGreen', G.extrudeX([[-2.2, A + 22.5], [2.2, A + 22.5], [2.2, A + 24.2, 1], [-2.2, A + 24.2, 1]], -40, 36, { bevel: 0.3 }));
-  // маховики под колпачками
-  k.add('alu', at(G.cylY(9.5, 17, 27, { c: 1.4, seg: 28 }), { p: [8, 0, 0] }));
-  k.add('alu', at(G.cylZ(9.5, 17, 27, { c: 1.4, seg: 28 }), { p: [8, 0, 0] }));
-  // RMR сверху (как в TA31RMR)
-  const r = ctx.kit();
-  k.add('alu', G.extrudeX([[-12, A + 23], [12, A + 23], [12, A + 30, 3], [-12, A + 30, 3]], -24, 16, { bevel: 1 }));
-  k.add('alu', G.extrudeX(G.shape([[-13, A + 29], [13, A + 29], [13, A + 42, 6], [8, A + 46, 4], [-8, A + 46, 4], [-13, A + 42, 6]], [G.rrect(0, A + 38, 20, 12, 4)]), -20, 8, { bevel: 1 }));
-  const root = G.node('acog', [k.build()]);
+  // ножки корпуса до кронштейна (два «копыта» с винтами)
+  for (const x of [-26, 14]) {
+    k.add('alu', G.extrudeX([[-12, 6, 1], [12, 6, 1], [11, A - 14, 3], [-11, A - 14, 3]], x, x + 14, { bevel: 1.2 }));
+    for (const s of [-1, 1]) k.add('steel', G.T(G.screwHead(2.2, 1), { r: [0, 0, 0], p: [x + 7, 12, s * 12.2] }));
+  }
+  k.add('alu', G.extrudeX([[-10, 6, 1], [10, 6, 1], [10, 10, 1], [-10, 10, 1]], -26, 28, { bevel: 0.8 }));
+  // корпус: окуляр, средняя часть, раструб объектива
+  k.add('alu', at(hollowLathe([[-74, 14.5], [-73, 19.8], [-70, 20.6], [-54, 20.6], [-50, 18.8], [-44, 18.2], [26, 18.2], [36, 20], [54, 23.6], [72, 24.2], [74.5, 23.2]], [[-74, 15.8], [30, 15.8], [74.5, 18]], { seg: 44 })));
+  // резиновый наглазник и кольцо окуляра с насечкой
+  k.add('rubber', at(G.tubeX(21.2, 19.8, -76, -68, { seg: 40 })));
+  k.add('alu', at(G.flutesX(20.6, -66, -56, 36, 1.2, 0.6)));
+  k.add('lensBlack', at(G.tubeX(15.9, 15.2, -72, 30, { seg: 32 })));
+  k.add('lensBlack', at(G.tubeX(18.1, 17.4, 30, 73.5, { seg: 32 })));
+  // «плечи» корпуса под барабанами (квадратное сечение с большими радиусами)
+  k.add('alu', at(G.extrudeX(G.rrect(0, 0, 40, 40, 11), -8, 24, { bevel: 2 })));
+  // барабаны под колпачками: вертикаль сверху, горизонталь справа
+  k.add('alu', at(G.cylY(10, 19, 29, { c: 1.4, seg: 32 }), { p: [8, 0, 0] }));
+  k.add('alu', at(G.ringGrooves(10, 20, 27, 3, 0.4, { seg: 32 }), { r: [0, 0, 90], p: [8, 0, 0] }));
+  k.add('alu', at(G.cylZ(10, 19, 29, { c: 1.4, seg: 32 }), { p: [8, 0, 0] }));
+  k.add('alu', at(G.ringGrooves(10, 20, 27, 3, 0.4, { seg: 32 }), { r: [0, -90, 0], p: [8, 0, 0] }));
+  // гребень со световодом: открыт спереди, сзади — площадка под RMR
+  k.add('alu', G.extrudeX([[-9, A + 14, 2], [9, A + 14, 2], [8, A + 23, 3], [-8, A + 23, 3]], -44, 42, { bevel: 1.5 }));
+  k.add('emGreen', G.extrudeX([[-2.4, A + 22.2], [2.4, A + 22.2], [2.4, A + 24, 1], [-2.4, A + 24, 1]], 10, 38, { bevel: 0.3 }));
+  for (let i = 0; i < 4; i++) k.add('alu', G.T(G.box(1.6, 2.4, 7, { bevel: 0.4 }), { p: [14 + i * 7, A + 24.2, 0] }));
+  // площадка RMR (штатная у TA31RMR) и два винта
+  k.add('alu', G.extrudeX(G.rrect(0, A + 24, 25, 2.2, 0.8), -40, 6, { bevel: 0.6 }));
+  for (const x of [-30, -4]) k.add('steel', G.T(G.cylY(2.2, A + 25, A + 26.2, { seg: 12 }), { p: [x, 0, 0] }));
+  // RMR Type 2: собственная прицельная ось (сетка «точка»)
+  const rk = ctx.kit();
+  const RA = rmrBody(ctx, rk);
+  const glass = lens(ctx, G.extrudeX(G.shape(G.rrect(0, RA + 0.5, 18.6, 13.4, 5)), 6, 7, { bevel: 0.2 }), 'glassAmber');
+  const rmr = G.node('acogRmr', [rk.build(), glass]);
+  rmr.position.set(-17, A + 25.1, 0);
+  const root = G.node('acog', [k.build(), rmr]);
   const oc = lens(ctx, at(ctx.C.lensDisc(15.8, -72)), 'glassBlue');
-  const ob = lens(ctx, at(ctx.C.lensDisc(17, 73)), 'glassAmber');
-  const rmr = lens(ctx, G.extrudeX(G.rrect(0, A + 38, 20, 12, 4), 4, 5, { bevel: 0.2 }), 'glassBlue');
-  root.add(oc, ob, rmr);
-  return { root, sight: { y: A, z: 0, x0: -74, x1: 75, r: 15, mag: 4, reticle: 'chevron', eyeRelief: 38, lens: oc } };
+  const ob = lens(ctx, at(ctx.C.lensDisc(17.8, 73)), 'glassAmber');
+  root.add(oc, ob);
+  return {
+    root,
+    sight: { y: A, z: 0, x0: -76, x1: 75, r: 15, mag: 4, reticle: 'chevron', eyeRelief: 38, lens: oc },
+    sights: [{ label: 'RMR на ACOG', node: rmr, y: RA, z: 0, x0: -22, x1: 15, r: 9, mag: 1, reticle: 'dot', lens: glass }],
+  };
 }
 
 /* ------------------------------------------------ Прицел 1–6×24 (LPVO) */
@@ -296,6 +322,183 @@ function mbusFront(ctx) {
   return { root: G.node('mbus_front', [k.build(), flip]), irons: { front: [0, 35.5, 0] }, flip: { node: flip, angle: 90 } };
 }
 
+/* ------------------------------------------- Коллиматоры и голографы (лёгкие) */
+
+// Aimpoint CompM4s на QRP2 + проставка 39 мм: труба 30 мм, батарея АА под объективом.
+function compm4(ctx) {
+  const k = ctx.kit();
+  const A = 39;
+  const at = (g, t = {}) => G.T(g, { ...t, p: [(t.p?.[0] || 0), A + (t.p?.[1] || 0), t.p?.[2] || 0] });
+  // QRP2: башмак, проставка и кольцо-хомут с крупным барашком справа
+  k.add('alu', clampBody(-16, 16, 6));
+  k.add('alu', G.extrudeZ(G.shape([[-15, 5, 1], [15, 5, 1], [13, A - 17, 3], [-13, A - 17, 3]], [G.slot(-7, 7, (A - 12) / 2 + 3, 8)]), 20, { bevel: 1.2 }));
+  k.add('alu', at(G.tubeX(22.4, 19.6, -11, 11, { seg: 44, c: 1.2 })));
+  k.add('alu', G.extrudeX([[-6, A - 26], [6, A - 26], [6, A - 18], [-6, A - 18]], -11, 11, { bevel: 0.8 }));
+  k.add('alu', G.T(ctx.C.knob(11, 9, 20), { r: [0, -90, 0], p: [0, -1, 13] }));
+  k.add('steel', G.cylZ(3.4, -15, 13, { seg: 12 }), { p: [0, -1, 0] });
+  // корпус
+  k.add('alu', at(hollowLathe([[-60, 18.8], [-59, 21], [-50, 21], [-48, 19.6], [36, 19.6], [40, 21.6], [58, 21.6], [60, 20.2]], [[-60, 15.2], [60, 17.4]], { seg: 48 })));
+  k.add('rubber', at(G.tubeX(21.4, 20.2, -58, -50, { seg: 44 })));
+  k.add('lensBlack', at(G.tubeX(17.5, 16.8, -58, 58, { seg: 32 })));
+  k.add('alu', at(G.ringGrooves(21.6, 44, 56, 4, 0.5, { seg: 44 })));
+  // башня регулировок: колпачки сверху и справа
+  k.add('alu', at(G.extrudeX(G.rrect(0, 0, 34, 34, 9), 8, 30, { bevel: 1.6 })));
+  k.add('alu', at(G.cylY(9.5, 16, 26, { c: 1.2, seg: 28 }), { p: [19, 0, 0] }));
+  k.add('alu', at(G.cylZ(9.5, 16, 26, { c: 1.2, seg: 28 }), { p: [19, 0, 0] }));
+  // батарейный отсек АА под объективом, крышка спереди; переключатель яркости слева
+  k.add('alu', at(G.cylX(9.4, 14, 58, { c: 1, seg: 28 }), { p: [0, -21, 0] }));
+  k.add('alu', at(G.extrudeX([[-7, -19], [7, -19], [7, -12], [-7, -12]], 14, 58, { bevel: 0.8 })));
+  k.add('alu', at(ctx.C.knob(10, 8, 24), { r: [0, 0, -90], p: [58, -21, 0] }));
+  k.add('alu', at(ctx.C.knob(9, 7, 20), { r: [0, 90, 0], p: [-30, 0, -19.5] }));
+  const root = G.node('compm4', [k.build()]);
+  root.add(lens(ctx, at(ctx.C.lensDisc(15.4, -57)), 'glassBlue'));
+  const front = lens(ctx, at(ctx.C.lensDisc(17.4, 57)), 'glassRed');
+  root.add(front);
+  return { root, sight: { y: A, z: 0, x0: -60, x1: 60, r: 15, mag: 1, reticle: 'dot', lens: front } };
+}
+
+// EOTech XPS2-0: короткий голограф с поперечной батареей CR123, окно на абсолютном совмещении.
+function xps2(ctx) {
+  const k = ctx.kit();
+  const A = 36;
+  k.add('alu', clampBody(-18, 18, 5.5));
+  k.add('steel', crossBolt(0, -2.5, 13, { nutR: 0 }).slice(0, 1));
+  k.add('steel', G.T(ctx.C.knob(7, 5, 16), { r: [0, -90, 0], p: [0, -1, 13] }));
+  // основание-корпус
+  k.add('alu', G.extrudeX([[-16, 4.5, 1], [16, 4.5, 1], [16, 13, 3], [-16, 13, 3]], -36, 40, { bevel: 1.2 }));
+  // батарейный отсек спереди (поперечный) и кнопки сзади
+  k.add('alu', G.T(G.cylZ(9, -16.5, 16.5, { c: 1, seg: 28 }), { p: [30, 13, 0] }));
+  k.add('alu', G.T(ctx.C.knob(9.3, 5, 22), { r: [0, -90, 0], p: [30, 13, 16.5] }));
+  k.add('alu', G.extrudeZ([[-36, 5], [-26, 5], [-26, 20, 3], [-36, 17, 2]], 30, { bevel: 1.2 }));
+  for (const y of [9, 15]) k.add('rubber', G.T(G.box(3, 4.6, 12, { bevel: 0.8 }), { p: [-36.5, y, 0] }));
+  // кожух окна: арка с толстыми стенками
+  const arch = (w, cy, h0) => {
+    const pts = [[-w, h0], [w, h0]];
+    for (let i = 0; i <= 16; i++) { const a = (i / 16) * Math.PI; pts.push([Math.cos(a) * w, cy + Math.sin(a) * w]); }
+    return pts;
+  };
+  k.add('alu', G.extrudeX(G.shape(arch(21, A + 2, 11), [arch(15.6, A + 2, 19.6)]), -22, 24, { bevel: 1.2 }));
+  k.add('alu', G.extrudeX([[-21, 11], [21, 11], [21, 20], [-21, 20]], -22, 24, { bevel: 0.8 }));
+  for (const s of [-1, 1]) k.add('steel', G.T(G.cylZ(2.2, 0, 1.2, { seg: 12 }), { p: [16, A - 8, s * 21] }));
+  const root = G.node('xps2', [k.build()]);
+  const rp = G.rrect(0, A - 1, 28, 26, 7);
+  root.add(lens(ctx, G.extrudeX(rp, -14, -12.8, { bevel: 0.2 }), 'glassBlue'));
+  const front = lens(ctx, G.extrudeX(rp, 16, 17.2, { bevel: 0.2 }), 'glassAmber');
+  root.add(front);
+  return { root, sight: { y: A, z: 0, x0: -14, x1: 17, r: 13, mag: 1, reticle: 'holo', lens: front } };
+}
+
+// Holosun HS510C: открытый коллиматор с титановым кожухом, солнечной панелью и QD-рычагом.
+function hs510c(ctx) {
+  const k = ctx.kit();
+  const A = 36;
+  k.add('alu', clampBody(-20, 22, 5));
+  k.add('steel', qdLever(-16, 14, -1));
+  k.add('steel', crossBolt(0, -2.5, 13, { nutR: 0 }).slice(0, 1));
+  // плита основания и задний блок с электроникой
+  k.add('alu', G.extrudeX([[-17, 4, 1], [17, 4, 1], [17, 12, 2], [-17, 12, 2]], -34, 32, { bevel: 1.2 }));
+  k.add('alu', G.extrudeZ([[-34, 10], [-8, 10], [-8, 15, 2], [-14, 18, 3], [-34, 17, 3]], 32, { bevel: 1.5 }));
+  k.add('lensBlack', G.T(G.box(16, 0.8, 22, { bevel: 0.3 }), { p: [-22, 17.8, 0], r: [0, 0, -4] }));
+  // кнопки «+/−» слева, винты выверки
+  for (const x of [-28, -18]) k.add('rubber', G.T(G.cylZ(2.6, -17.8, -16, { c: 0.6, seg: 16 }), { p: [x, 13.5, 0] }));
+  k.add('steel', G.T(G.cylY(2.4, 16.5, 18, { seg: 14 }), { p: [-10, 0, 8] }));
+  k.add('steel', G.T(G.cylZ(2.4, 16, 17.6, { seg: 14 }), { p: [-12, 13.5, 0] }));
+  // кожух окна: рамка + «дуга безопасности» над окном
+  const frame = G.shape([[-20, 10, 2], [20, 10, 2], [20, A + 13, 8], [-20, A + 13, 8]], [G.rrect(0, A, 32, 26, 6)]);
+  k.add('alu', G.extrudeX(frame, 14, 24, { bevel: 1.4 }));
+  k.add('alu', G.extrudeX(G.shape([[-20, A + 8, 3], [20, A + 8, 3], [20, A + 13, 4], [-20, A + 13, 4]]), -8, 20, { bevel: 1.2 }));
+  // боковые щёки кожуха с вырезом — вид сбоку как у настоящего 510C
+  const cheek = G.shape([[-8, 10, 1], [24, 10, 1], [24, A + 13, 3], [-8, A + 13, 3]], [[[-2, 22, 3], [16, 22, 3], [16, A + 6, 4], [2, A + 6, 4]]]);
+  for (const s of [-1, 1]) k.add('alu', G.extrudeZ(cheek, 3.4, { bevel: 0.8, z: s * 18.3 }));
+  const root = G.node('hs510c', [k.build()]);
+  const win = lens(ctx, G.extrudeX(G.shape(G.rrect(0, A, 32, 26, 6)), 17.4, 18.4, { bevel: 0.2 }), 'glassBlue');
+  root.add(win);
+  return { root, sight: { y: A, z: 0, x0: -8, x1: 18, r: 13, mag: 1, reticle: 'cdot', lens: win } };
+}
+
+// Trijicon MRO: короткий корпус с расширяющимся объективом 25 мм, ось 39 мм.
+function mro(ctx) {
+  const k = ctx.kit();
+  const A = 39;
+  const at = (g, t = {}) => G.T(g, { ...t, p: [(t.p?.[0] || 0), A + (t.p?.[1] || 0), t.p?.[2] || 0] });
+  k.add('alu', clampBody(-18, 18, 5.5));
+  k.add('alu', G.extrudeZ(G.shape([[-17, 5], [17, 5], [15, A - 13, 3], [-15, A - 13, 3]], [G.slot(-8, 8, (A - 8) / 2 + 3, 9)]), 18, { bevel: 1.2 }));
+  k.add('steel', crossBolt(0));
+  k.add('alu', at(hollowLathe([[-30, 15], [-29, 16.6], [-10, 16.6], [18, 19.6], [30, 20.2], [32, 19.2]], [[-30, 12.4], [32, 16.8]], { seg: 44 })));
+  k.add('lensBlack', at(G.tubeX(16.9, 16.2, 10, 31, { seg: 32 })));
+  k.add('lensBlack', at(G.tubeX(12.5, 11.8, -29, 10, { seg: 32 })));
+  k.add('alu', G.extrudeX([[-12, A - 16, 2], [12, A - 16, 2], [12, A - 10], [-12, A - 10]], -16, 16, { bevel: 1 }));
+  // колесо яркости сверху-слева, регулировки сверху и справа
+  k.add('alu', at(ctx.C.knob(8.5, 6, 26), { r: [0, 0, 90], p: [-14, 14.5, -6] }));
+  k.add('alu', at(G.cylY(6.5, 15, 20, { c: 0.8, seg: 20 }), { p: [6, 0, 5] }));
+  k.add('alu', at(G.cylZ(6.5, 15, 20, { c: 0.8, seg: 20 }), { p: [6, 0, 0] }));
+  const root = G.node('mro', [k.build()]);
+  root.add(lens(ctx, at(ctx.C.lensDisc(12.6, -28.5)), 'glassBlue'));
+  const front = lens(ctx, at(ctx.C.lensDisc(17, 30.5)), 'glassRed');
+  root.add(front);
+  return { root, sight: { y: A, z: 0, x0: -30, x1: 32, r: 12, mag: 1, reticle: 'dot', lens: front } };
+}
+
+// Trijicon RMR Type 2 на райзере Unity FAST (ось на высоте нижней трети AR).
+function rmrRiser(ctx) {
+  const k = ctx.kit(), m = ctx.kit();
+  const H = 24;
+  k.add('alu', clampBody(-17, 17, 5, { w: 25 }));
+  k.add('steel', crossBolt(-8));
+  k.add('steel', crossBolt(8));
+  // стойка с облегчающим окном
+  k.add('alu', G.extrudeZ(G.shape([[-18, 4, 1], [18, 4, 1], [17, H, 1.5], [-17, H, 1.5]], [G.slot(-10, 10, H / 2 + 2, 8)]), 24, { bevel: 1 }));
+  k.add('alu', G.extrudeX(G.rrect(0, H - 1.5, 26, 3, 1), -22, 22, { bevel: 0.6 }));
+  const A = rmrBody(ctx, m);
+  const glass = lens(ctx, G.extrudeX(G.shape(G.rrect(0, A + 0.5, 18.6, 13.4, 5)), 6, 7, { bevel: 0.2 }), 'glassAmber');
+  const body = G.node('rmr', [m.build(), glass]);
+  body.position.set(-3, H, 0);
+  return { root: G.node('rmr_riser', [k.build(), body]), sight: { node: body, y: A, z: 0, x0: -22, x1: 15, r: 9, mag: 1, reticle: 'dot', lens: glass } };
+}
+
+// ПК-120 (БелОМО): коллиматор с прямоугольным кожухом-«тоннелем» и выносной батареей.
+function pk120(ctx) {
+  const k = ctx.kit();
+  const A = 40;
+  k.add('alu', clampBody(-24, 24, 6));
+  k.add('steel', crossBolt(-10));
+  k.add('steel', G.T(ctx.C.knob(8, 7, 18), { r: [0, -90, 0], p: [12, -1, 13] }));
+  k.add('alu', G.extrudeX([[-15, 5, 1], [15, 5, 1], [15, A - 16, 2], [-15, A - 16, 2]], -30, 30, { bevel: 1.2 }));
+  // тоннель: восьмигранное сечение со скосами, стенки 4 мм
+  const oct = (w, h, c, cy) => [[-w + c, cy - h], [w - c, cy - h], [w, cy - h + c], [w, cy + h - c], [w - c, cy + h], [-w + c, cy + h], [-w, cy + h - c], [-w, cy - h + c]];
+  k.add('alu', G.extrudeX(G.shape(oct(20, 17, 6, A), [oct(16, 13, 5, A)]), -34, 34, { bevel: 1.2 }));
+  // бленда объектива, отсек батареи справа, маховик яркости слева
+  k.add('alu', G.extrudeX(G.shape(oct(21, 18, 6.5, A), [oct(16.5, 13.5, 5, A)]), 26, 36, { bevel: 1 }));
+  k.add('alu', G.T(G.cylX(7.5, -30, 6, { c: 1, seg: 24 }), { p: [0, A - 4, 24] }));
+  k.add('alu', G.T(ctx.C.knob(7.8, 5, 18), { r: [0, 180, 0], p: [-30, A - 4, 24] }));
+  k.add('alu', G.T(ctx.C.knob(9, 7, 22), { r: [0, 90, 0], p: [-18, A - 6, -20] }));
+  const root = G.node('pk120', [k.build()]);
+  const win = lens(ctx, G.extrudeX(G.shape(oct(16, 13, 5, A)), 24, 25, { bevel: 0.2 }), 'glassRed');
+  root.add(win);
+  return { root, sight: { y: A, z: 0, x0: -34, x1: 36, r: 12, mag: 1, reticle: 'dot', lens: win } };
+}
+
+// ОКП-7Д «Валдай»: низкий коллиматор на «ласточкин хвост» АК, тоннель над крышкой.
+// Начало — боковая планка на левом борту коробки, +Z — к оси оружия.
+function okp7(ctx) {
+  const k = ctx.kit();
+  const Y = 50, Z = 19;
+  k.add('steel', G.extrudeX(G.shape([[-3, -9, 1], [4, -9], [4, 9], [-3, 9, 1], [-11, 7, 2], [-11, -7, 2]]), -46, 46, { bevel: 0.8 }));
+  k.add('steel', G.T(ctx.C.knob(7, 6, 18), { r: [0, 90, 0], p: [-26, 0, -11] }));
+  // кронштейн от планки вверх и над крышкой
+  k.add('alu', G.extrudeX(G.shape([[-11, 6, 2], [4, 6, 2], [Z - 6, Y - 18, 3], [Z - 10, Y - 12, 3], [-11, 20, 2]]), -44, 44, { bevel: 1.4 }));
+  // корпус-тоннель: трапеция, сзади и спереди открыт
+  const trap = (w0, w1, y0, y1) => [[Z - w0, y0, 2], [Z + w0, y0, 2], [Z + w1, y1, 5], [Z - w1, y1, 5]];
+  k.add('alu', G.extrudeX(G.shape(trap(22, 17, Y - 17, Y + 15), [trap(17.5, 13.5, Y - 13, Y + 11.5)]), -48, 40, { bevel: 1.4 }));
+  // блок электроники снизу-сзади и переключатель яркости справа
+  k.add('alu', G.extrudeX([[Z - 18, Y - 22, 2], [Z + 18, Y - 22, 2], [Z + 18, Y - 16], [Z - 18, Y - 16]], -48, -8, { bevel: 1 }));
+  k.add('alu', G.T(ctx.C.knob(8, 6, 20), { r: [0, -90, 0], p: [-30, Y - 6, Z + 21] }));
+  const root = G.node('okp7', [k.build()]);
+  const win = lens(ctx, G.extrudeX(G.shape(trap(17.5, 13.5, Y - 13, Y + 11.5)), 30, 31, { bevel: 0.2 }), 'glassAmber');
+  root.add(win);
+  return { root, sight: { y: Y - 1, z: Z, x0: -48, x1: 31, r: 12, mag: 1, reticle: 'dot', lens: win } };
+}
+
 const mag1x39 = (cfg, asm) => {
   const it = asm.installed.get('optic');
   const s = it?.info?.sight;
@@ -306,7 +509,14 @@ export const OPTICS = [
   { id: 't2_low', cat: 'optic', name: 'Aimpoint Micro T-2', desc: 'Коллиматор, низкое крепление (ось 20 мм). Для высоких планок АК', foot: [-18, 18], body: [-38, 38], stats: { weight: 135, ergo: -1, adsTime: 8 }, build: (c) => t2(c, 20) },
   { id: 't2_lrp', cat: 'optic', name: 'Aimpoint T-2 + LRP 39 мм', desc: 'Коллиматор на кронштейне, нижняя треть с механикой AR', foot: [-18, 18], body: [-38, 38], stats: { weight: 190, ergo: -1, adsTime: 10 }, build: (c) => t2(c, 39) },
   { id: 'exps3', cat: 'optic', name: 'EOTech EXPS3', desc: 'Голографический, кольцо 68 MOA с точкой', foot: [-22, 22], body: [-48, 46], stats: { weight: 320, ergo: -3, adsTime: 14 }, build: exps3 },
-  { id: 'acog', cat: 'optic', name: 'Trijicon ACOG TA31 4×32', desc: 'Призменный 4×, шеврон с дальномерной шкалой', foot: [-32, 32], body: [-75, 76], stats: { weight: 480, ergo: -6, adsTime: 40 }, build: acog },
+  { id: 'compm4', cat: 'optic', name: 'Aimpoint CompM4s', desc: 'Армейский коллиматор, точка 2 MOA, батарея АА на 8 лет', foot: [-16, 16], body: [-62, 62], stats: { weight: 380, ergo: -3, adsTime: 14 }, build: compm4 },
+  { id: 'mro', cat: 'optic', name: 'Trijicon MRO', desc: 'Компактный коллиматор с широким полем зрения, точка 2 MOA', foot: [-18, 18], body: [-31, 33], stats: { weight: 170, ergo: -1, adsTime: 9 }, build: mro },
+  { id: 'rmr_riser', cat: 'optic', name: 'Trijicon RMR на райзере Unity', desc: 'Мини-коллиматор открытого типа, самый лёгкий', foot: [-17, 17], body: [-25, 22], stats: { weight: 90, ergo: 0, adsTime: 6 }, build: rmrRiser },
+  { id: 'hs510c', cat: 'optic', name: 'Holosun HS510C', desc: 'Открытый коллиматор: кольцо 65 MOA + точка, солнечная панель', foot: [-20, 22], body: [-34, 32], stats: { weight: 245, ergo: -1, adsTime: 8 }, build: hs510c },
+  { id: 'xps2', cat: 'optic', name: 'EOTech XPS2-0', desc: 'Короткий голографический, абсолютное совмещение с механикой', foot: [-18, 18], body: [-37, 40], stats: { weight: 255, ergo: -2, adsTime: 11 }, build: xps2 },
+  { id: 'pk120', cat: 'optic', name: 'ПК-120 (БелОМО)', desc: 'Коллиматор в защищённом кожухе-тоннеле', foot: [-24, 24], body: [-40, 37], stats: { weight: 310, ergo: -2, adsTime: 12 }, build: pk120 },
+  { id: 'okp7d', cat: 'optic', name: 'ОКП-7Д «Валдай»', desc: 'Низкий коллиматор на боковую планку АК, окно над крышкой', mountTypes: ['dovetail'], only: ['akm', 'ak74'], foot: [-46, 46], body: [-48, 46], needs: (cfg) => !cfg.sidemount, stats: { weight: 290, ergo: -2, adsTime: 11 }, build: okp7 },
+  { id: 'acog', cat: 'optic', name: 'Trijicon ACOG TA31RMR 4×32', desc: 'Призменный 4×, шеврон со шкалой + RMR сверху для ближнего боя (V — переключить)', foot: [-32, 32], body: [-77, 76], stats: { weight: 530, ergo: -6, adsTime: 40 }, build: acog },
   { id: 'lpvo', cat: 'optic', name: 'Прицел 1–6×24', desc: 'Переменная кратность, колёсико — зум в прицеле', foot: [-38, 34], body: [-132, 106], stats: { weight: 720, ergo: -9, adsTime: 55 }, build: lpvo },
   { id: 'mag3x', cat: 'magnifier', name: 'Aimpoint 3XMag-1 + FTS', desc: 'Увеличитель 3×, откидывается вбок', foot: [-16, 16], body: [-57, 55], needs: mag1x39, stats: { weight: 330, ergo: -4, adsTime: 20 }, build: magnifier },
   { id: 'pvs14', cat: 'magnifier', name: 'Монокуляр AN/PVS-14', desc: 'ПНВ за коллиматором на откидном кронштейне (N — откинуть)', foot: [-16, 16], body: [-86, 60], needs: mag1x39, stats: { weight: 420, ergo: -6, adsTime: 25 }, build: pvs14 },

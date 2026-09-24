@@ -246,9 +246,10 @@ function scarStock(ctx, o = {}) {
 function scarGrip(ctx) {
   const k = ctx.kit();
   const a = 20 * Math.PI / 180, sh = (y) => Math.tan(a) * y;
-  const pts = [[2, 0, 0], [0, -16, 3], [5, -24, 3], [0, -34, 3], [-2, -60, 3], [-1, -100, 3], [-38, -102, 4], [-38, -70, 4], [-40, -30, 4], [-44, 0, 4], [-34, 6, 0]].map(([x, y, r]) => [x + sh(y), y, r]);
-  k.add('polyFde', G.extrudeZ(pts, 30, { bevel: 6, curve: 8 }));
-  for (let i = 0; i < 8; i++) for (const s of [-1, 1]) k.add('polyFdeDark', G.T(G.box(26, 1.3, 1, { bevel: 0.3 }), { p: [sh(-22 - i * 9) - 18, -22 - i * 9, s * 14.7], r: [0, 0, 20] }));
+  const front = [[2, 0], [0, -16], [5, -24], [0, -34], [-2, -60], [-1, -100]].map(([x, y]) => [x + sh(y), y]);
+  const back = [[-34, 6], [-44, 0], [-40, -30], [-38, -70], [-38, -102]].map(([x, y]) => [x + sh(y), y]);
+  k.add('polyFde', G.gripLoft(front, back, { w: 30, width: (t) => 0.86 + 0.14 * Math.sin(Math.PI * Math.min(1, t * 1.6)) }));
+  for (let i = 0; i < 8; i++) for (const s of [-1, 1]) k.add('polyFdeDark', G.T(G.box(16, 1.1, 1.2, { bevel: 0.3 }), { p: [sh(-24 - i * 8.5) - 22, -24 - i * 8.5, s * 13.3], r: [0, 0, 20] }));
   return { root: k.build('scar_grip') };
 }
 

@@ -516,14 +516,16 @@ function akGrip(ctx, o) {
   const k = ctx.kit();
   const a = (o.angle ?? 18) * Math.PI / 180;
   const sh = (y) => Math.tan(a) * y;
-  const front = o.front.map(([f, y]) => [sh(y) + f, y, 3]);
-  const back = o.back.map(([f, y]) => [sh(y) + f, y, 4]).reverse();
-  k.add(o.mat, G.extrudeZ([...front, ...back], o.w ?? 30, { bevel: o.bevel ?? 7, curve: 8 }));
+  const front = o.front.map(([f, y]) => [sh(y) + f, y]);
+  const back = o.back.map(([f, y]) => [sh(y) + f, y]);
+  const W = o.w ?? 30;
+  // скруглённое тело по контурам; у АК рукоять почти одинаковой ширины по высоте
+  k.add(o.mat, G.gripLoft(front, back, { w: W, k: 2.8, taper: 0.22, width: (t) => 0.9 + 0.1 * Math.sin(Math.PI * t) }));
+  // вертикальные рифы бакелитовой рукояти АКМ (по боковой плоскости)
   if (o.grooves) for (let i = 0; i < o.grooves; i++) for (const s of [-1, 1]) {
-    const y = -18 - i * (70 / o.grooves);
-    k.add(o.mat, G.T(G.box(1.4, 62, 1.2, { bevel: 0.4 }), { p: [sh(-55) - 8 - i * 3.4, -55, s * ((o.w ?? 28) / 2 - 0.4)], r: [0, 0, -o.angle] }));
+    k.add(o.mat, G.T(G.box(1.6, 58, 1.2, { bevel: 0.5 }), { p: [sh(-52) - 9 - i * 3.3, -52, s * (W / 2 * 0.93 - 0.3)], r: [0, 0, -o.angle] }));
   }
-  if (o.texture) for (let i = 0; i < 9; i++) for (const s of [-1, 1]) k.add(o.mat, G.T(G.box(24, 1.3, 1, { bevel: 0.3 }), { p: [sh(-20 - i * 8.5) - 16, -20 - i * 8.5, s * ((o.w ?? 28) / 2 - 0.3)], r: [0, 0, o.angle] }));
+  if (o.texture) for (let i = 0; i < 9; i++) for (const s of [-1, 1]) k.add(o.mat, G.T(G.box(16, 1.2, 1.1, { bevel: 0.3 }), { p: [sh(-20 - i * 8.5) - 20, -20 - i * 8.5, s * (W / 2 * 0.9 - 0.2)], r: [0, 0, o.angle] }));
   if (o.cap) k.add('polySoft', G.T(G.box(34, 5, (o.w ?? 28) - 4, { bevel: 2 }), { p: [sh(-o.h) - 16, -o.h - 1, 0] }));
   k.add('steel', G.T(G.cylY(3, -o.h - 2, -o.h + 1, { seg: 12 }), { p: [sh(-o.h) - 14, 0, 0] }));
   return { root: k.build('pgrip') };

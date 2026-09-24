@@ -77,20 +77,28 @@ function makeTextures() {
   const mix = new Float32Array(S * S);
   for (let i = 0; i < mix.length; i++) mix[i] = coarse[i] * 0.55 + fine[i] * 0.45;
 
-  // Ламинированная берёза / орех: волокна вдоль U с кольцами.
-  const wood = (hue) => {
-    const n = fbm(S, 4, 301, 4), n2 = fbm(S, 3, 555, 16);
-    return toTex(S, (i) => {
-      const x = i % S, y = (i / S) | 0;
-      const v = y / S + n[i] * 0.35 + n2[i] * 0.04;
-      const ring = Math.pow(Math.abs(Math.sin(v * Math.PI * 9)), 6);
-      const fib = n2[(y * S + ((x * 5) % S))] * 0.25;
-      const k = 0.82 + fib * 0.6 - ring * 0.17 + (coarse[i] - 0.5) * 0.12;
-      return [hue[0] * k, hue[1] * k, hue[2] * k];
-    }, true);
+  // Клеёная берёза (АКМ) / орех: прямые волокна вдоль U, тонкие слои шпона,
+  // редкие мягкие «разводы» — без мультяшных колец.
+  const streak = (() => {
+    const n = fbm(S, 4, 555, 16), out = new Float32Array(S * S), R = 18;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      let a = 0;
+      for (let d = -R; d <= R; d++) a += n[y * S + ((x + d + S) % S)];
+      out[y * S + x] = a / (2 * R + 1);
+    }
+    return out;
+  })();
+  const woodVal = (i) => {
+    const y = ((i / S) | 0) / S;
+    const ply = 0.5 + 0.5 * Math.sin((y + coarse[i] * 0.06) * Math.PI * 2 * 28);
+    return (streak[i] - 0.5) * 1.6 + (ply - 0.5) * 0.12 + (coarse[i] - 0.5) * 0.25;
   };
+  const wood = (hue) => toTex(S, (i) => {
+    const k = 0.9 + woodVal(i) * 0.5;
+    return [hue[0] * k, hue[1] * k, hue[2] * k];
+  }, true);
   const woodH = new Float32Array(S * S);
-  { const n = fbm(S, 4, 301, 4); for (let i = 0; i < S * S; i++) { const y = ((i / S) | 0) / S; woodH[i] = Math.pow(Math.abs(Math.sin((y + n[i] * 0.35) * Math.PI * 9)), 6); } }
+  for (let i = 0; i < S * S; i++) woodH[i] = woodVal(i) * 0.5 + 0.5;
 
   return {
     rough: roughFrom(mix, S, 0.72, 1.0),
@@ -100,8 +108,8 @@ function makeTextures() {
     nCast: normalFrom(mix, S, 3.2),
     nPoly: normalFrom(stipple, S, 5.5),
     nWood: normalFrom(woodH, S, 1.6),
-    woodBirch: wood([150, 66, 36]),
-    woodWalnut: wood([120, 70, 40]),
+    woodBirch: wood([100, 42, 24]),
+    woodWalnut: wood([92, 58, 36]),
   };
 }
 
@@ -132,7 +140,7 @@ export function createMaterials(envMap) {
   R.chrome = metal(0xc9cbce, 0.14, 1.0);
   R.alu = metal(0x1f2022, 0.46, 0.55, { ns: 0.25 });     // анодированный алюминий
   R.aluGrey = metal(0x3b3d40, 0.44, 0.6, { ns: 0.25 });
-  R.aluFde = metal(0x8f7a58, 0.58, 0.25, { cast: true, ns: 0.35, env: 0.8 });
+  R.aluFde = metal(0x75634a, 0.58, 0.25, { cast: true, ns: 0.35, env: 0.8 });
   R.aluOd = metal(0x4c4b38, 0.6, 0.25, { cast: true });
   R.cast = metal(0x262729, 0.66, 0.55, { cast: true, ns: 0.7 });
   R.brass = metal(0xc8a050, 0.3, 1.0);
@@ -143,18 +151,18 @@ export function createMaterials(envMap) {
   // полимер, резина
   R.poly = poly(0x1b1b1c, 0.74);
   R.polySoft = poly(0x202021, 0.86, { ns: 0.7 });
-  R.polyFde = poly(0x98845f, 0.78);
-  R.polyFdeDark = poly(0x6f6048, 0.8);
+  R.polyFde = poly(0x7f6c50, 0.78);
+  R.polyFdeDark = poly(0x5c4e3a, 0.8);
   R.polyPlum = poly(0x4c2a22, 0.58, { ns: 0.3 });
   R.polyOd = poly(0x4a4a36, 0.78);
   R.polyGrey = poly(0x3c3e41, 0.7);
   R.polyTan = poly(0xb09a74, 0.78);
   R.rubber = poly(0x141414, 0.92, { ns: 0.9, tile: 14 });
-  R.bakelite = std({ color: 0x7a2c10, roughness: 0.42, metalness: 0, normalMap: rep(tex.nCast, 60), normalScale: new THREE.Vector2(0.2, 0.2), roughnessMap: rep(tex.rough, 60) });
+  R.bakelite = std({ color: 0x4a1c0e, roughness: 0.4, metalness: 0, normalMap: rep(tex.nCast, 60), normalScale: new THREE.Vector2(0.2, 0.2), roughnessMap: rep(tex.rough, 60) });
 
   // дерево
   R.wood = phys({ color: 0xffffff, map: rep(tex.woodBirch, 160), roughness: 0.52, metalness: 0,
-    normalMap: rep(tex.nWood, 160), normalScale: new THREE.Vector2(0.25, 0.25), clearcoat: 0.35, clearcoatRoughness: 0.4 });
+    normalMap: rep(tex.nWood, 160), normalScale: new THREE.Vector2(0.15, 0.15), clearcoat: 0.3, clearcoatRoughness: 0.35 });
   R.woodDark = phys({ color: 0xffffff, map: rep(tex.woodWalnut, 160), roughness: 0.5, metalness: 0,
     normalMap: rep(tex.nWood, 160), normalScale: new THREE.Vector2(0.25, 0.25), clearcoat: 0.3, clearcoatRoughness: 0.45 });
 
