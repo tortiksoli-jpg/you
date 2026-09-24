@@ -57,7 +57,7 @@ function mlokRail(ctx) {
   const sections = [['hgBottom', 'bottom', 180, 102, [0, -R - 0.2, 0]], ['hgRight', 'right', 90, 72, [0, 0, R + 0.2]], ['hgLeft', 'left', -90, 72, [0, 0, -R - 0.2]]];
   for (const [id, face, rot, len, off] of sections) {
     const xs = x1 - 18 - len;
-    const rr = G.picatinny(len, { base: 5 });
+    const rr = G.picatinny(len, { base: 9.6 });
     const sk = ctx.kit();
     sk.add('alu', rr.geo, { p: [0, 9.4, 0] });
     sk.add('steel', G.T(G.screwHead(2.6, 1.2), { r: [-90, 0, 0] }), { p: [len * 0.25, 9.6, 0] });
@@ -103,10 +103,13 @@ function hkDiopter(ctx) {
   f.add('alu', G.extrudeZ(ear, 3, { bevel: 0.6, z: 11 }));
   f.add('alu', G.extrudeZ(ear, 3, { bevel: 0.6, z: -11 }));
   f.add('alu', G.extrudeZ([[-12, 0, 1], [12, 0, 1], [12, 22, 2], [-12, 22, 2]], 25, { bevel: 0.8 }));
-  // барабан диоптра с четырьмя отверстиями, ось — Z
-  f.add('steel', G.T(G.tubeX(9.5, 1.3, -8.5, 8.5, { seg: 28, c: 0.6 }), { r: [0, 0, 90], p: [0, 35.5, 0] }));
-  f.add('steel', G.T(G.cylZ(9.8, -8.5, 8.5, { seg: 28 }), { p: [0, 35.5, 0] }));
-  f.add('lensBlack', G.T(G.cylX(1.2, -10.2, 10.2, { seg: 12 }), { p: [0, 35.5, 0] }));
+  // барабан диоптра (ось — Z) со сквозным каналом вдоль X: боковые щёки + верх/низ средней части
+  const AP = 2.1, Y = 35.5;
+  for (const s of [-1, 1]) f.add('steel', G.T(G.cylZ(9.8, s > 0 ? AP : -8.5, s > 0 ? 8.5 : -AP, { seg: 28, c: 0.6 }), { p: [0, Y, 0] }));
+  const half = (sg) => { const pts = []; for (let i = 0; i <= 14; i++) { const a = Math.asin(AP / 9.8) + (i / 14) * (Math.PI - 2 * Math.asin(AP / 9.8)); pts.push([Math.cos(a) * 9.8, sg * Math.sin(a) * 9.8]); } return pts; };
+  for (const sg of [-1, 1]) f.add('steel', G.T(G.extrudeZ(half(sg), AP * 2 + 0.2, { bevel: 0.2 }), { p: [0, Y, 0] }));
+  // задний диоптр-кольцо: видно как «призрачное кольцо» при прицеливании
+  f.add('steel', G.T(G.tubeX(6.2, AP, -10.6, -9.2, { seg: 32, c: 0.3 }), { p: [0, Y, 0] }));
   f.add('steel', G.T(G.cylZ(5, 9.5, 12.4, { seg: 20 }), { p: [0, 35.5, 0] }));
   const flip = G.node('flip', [f.build()]);
   flip.position.set(12, 5.5, 0);
@@ -192,7 +195,8 @@ function stanagProfile(len, depth, curve, top = 48) {
   return { pts, off };
 }
 
-function magRounds(ctx, k, cal, top, x = -4) {
+function magRounds(ctx, k, cal, top, x = -4, body = null, mat = 'steelPark') {
+  if (body) ctx.C.feedLips(body, mat, -31, 2, 48, 11.5);
   ctx.C.cartridge(k, cal, { p: [x - 26, top + 3.6, -2.6], r: [0, 0, -2] });
   ctx.C.cartridge(k, cal, { p: [x - 26, top - 3.2, 2.6], r: [0, 0, -2] });
 }
@@ -217,7 +221,7 @@ function stanag(ctx, o) {
   const fy = -len;
   k.add(o.plate || o.mat, G.T(G.box(depth + 8, 7, W + 4, { bevel: 2 }), { p: [off(fy) + 3, fy - 2, 0], r: [0, 0, -Math.atan(off(fy) / len) * 20] }));
   if (o.window) k.add('glassDark', G.box(8, 60, 1, { bevel: 0.3 }), { p: [depth / 2 - 10, -20, W / 2 + 0.1] });
-  magRounds(ctx, rk, o.cal || '556', 44);
+  magRounds(ctx, rk, o.cal || '556', 44, -4, k, o.lips || o.mat);
   const rounds = rk.build('rounds');
   return { root: G.node('mag', [k.build(), rounds]), mag: { cap: o.cap, rounds } };
 }
@@ -231,7 +235,7 @@ function surefire60(ctx) {
   const low = stanagProfile(150, 64, 10).pts.filter((p) => p[1] < -24).map((p) => [p[0], p[1], 0]);
   k.add('alu', G.extrudeZ(low, 38, { bevel: 3 }));
   k.add('alu', G.T(G.box(68, 8, 40, { bevel: 2 }), { p: [off(-150) + 2, -152, 0] }));
-  magRounds(ctx, rk, '556', 44);
+  magRounds(ctx, rk, '556', 44, -4, k, 'alu');
   const rounds = rk.build('rounds');
   return { root: G.node('mag', [k.build(), rounds]), mag: { cap: 60, rounds } };
 }
@@ -248,7 +252,7 @@ function drum60(ctx) {
     k.add('glassDark', G.T(G.cylZ(9, 0, 1, { seg: 20 }), { p: [8, -110, s > 0 ? 42 : -44] }));
   }
   k.add('poly', G.T(G.box(20, 30, 12), { p: [8, -170, 0] }));
-  magRounds(ctx, rk, '556', 44);
+  magRounds(ctx, rk, '556', 44, -4, k, 'poly');
   const rounds = rk.build('rounds');
   return { root: G.node('mag', [k.build(), rounds]), mag: { cap: 60, rounds } };
 }

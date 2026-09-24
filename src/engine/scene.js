@@ -1,6 +1,7 @@
 // Сцена: рендер, освещение, окружение и стрельбище с мишенями.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 export const GUN_Y = 1.42;
 
@@ -129,13 +130,16 @@ function buildRange(scene) {
     grp.add(side);
   }
   // деревья вдали
+  // деревья — одной геометрией (один draw call вместо 60)
   const treeM = new THREE.MeshStandardMaterial({ color: 0x3f4d34, roughness: 1 });
+  const cones = [];
   for (let i = 0; i < 60; i++) {
-    const t = new THREE.Mesh(new THREE.ConeGeometry(2 + Math.random() * 2, 8 + Math.random() * 7, 7), treeM);
+    const c = new THREE.ConeGeometry(2 + Math.random() * 2, 8 + Math.random() * 7, 7);
     const a = (i / 60) * Math.PI * 1.2 - 0.6;
-    t.position.set(150 + Math.random() * 40, 4, Math.sin(a) * 90 + (Math.random() - 0.5) * 20);
-    grp.add(t);
+    c.translate(150 + Math.random() * 40, 4, Math.sin(a) * 90 + (Math.random() - 0.5) * 20);
+    cones.push(c);
   }
+  grp.add(new THREE.Mesh(mergeGeometries(cones), treeM));
 
   const targets = [];
   const steelM = new THREE.MeshStandardMaterial({ color: 0xd9d4c6, roughness: 0.55, metalness: 0.35 });

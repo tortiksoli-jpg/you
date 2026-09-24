@@ -8,7 +8,7 @@ export const AK = {
   FRONT: 24, REAR: -223,           // торцы ствольной коробки
   WALL: 11, BOTTOM: -24,           // верх боковин и дно коробки
   GAS_Y: 23, GAS_R: 9,             // ось газовой трубки
-  SIGHT_Y: 36,                     // линия прицеливания (прорезь целика / вершина мушки)
+  SIGHT_Y: 44,                     // линия прицеливания (прорезь целика / вершина мушки)
   REAR_X: 30, FRONT_X: 386,        // прорезь целика / мушка
   MUZZLE: 415,
 };
@@ -98,15 +98,18 @@ function barrelAndGas(ctx, k, o) {
   const { MUZZLE } = AK;
   k.add(M, G.latheX([[AK.FRONT - 6, 0], [AK.FRONT - 6, 12.5], [96, 12.5], [98, 11], [220, 10.2], [296, 9.4], [300, 9], [368, 8.4], [404, 8.2], [405, 7], [MUZZLE, 7], [MUZZLE, 3], [MUZZLE - 6, 3], [MUZZLE - 6, 0]], { seg: 32 }));
   // колодка прицела
-  k.add(M, G.extrudeZ([[AK.FRONT - 2, 6], [94, 6], [94, 25, 2], [86, 30.5, 3], [34, 31, 3], [AK.FRONT - 2, 27, 2]], 26, { bevel: 1.4 }));
+  k.add(M, G.extrudeZ([[AK.FRONT - 2, 6], [94, 6], [94, 27, 2], [86, 34, 3], [34, 37, 3], [AK.FRONT - 2, 33, 2]], 26, { bevel: 1.4 }));
   k.add(M, G.extrudeX(G.shape(G.circle(0, 0, 15, 24).map((p) => [p[0], p[1], 0])), AK.FRONT - 2, 94, { bevel: 1 }));
   // планка прицела с хомутиком и прорезью
   const leaf = ctx.kit();
-  leaf.add(M, G.extrudeZ([[AK.REAR_X, 31], [88, 31], [88, 33.2], [36, 34.6, 2], [AK.REAR_X, 35]], 17, { bevel: 0.5 }));
-  for (const s of [-1, 1]) leaf.add(M, G.extrudeZ([[AK.REAR_X, 33], [AK.REAR_X + 4, 33], [AK.REAR_X + 4, AK.SIGHT_Y + 1.8, 1], [AK.REAR_X, AK.SIGHT_Y + 1.8, 1]], 6, { bevel: 0.4, z: s * 4.6 }));
-  leaf.add('steelWorn', G.extrudeZ([[58, 30], [70, 30], [70, 36.5, 1], [58, 36.5, 1]], 20, { bevel: 0.8 }));
-  leaf.add('steelWorn', G.T(G.cylZ(2.6, 10, 13, { seg: 14 }), { p: [64, 33, 0] }));
-  for (let i = 0; i < 6; i++) leaf.add('paintWhite', G.T(G.box(0.6, 0.2, 3), { p: [40 + i * 7.5, 34.7 - i * 0.2, 5] }));
+  const SY = AK.SIGHT_Y;
+  leaf.add(M, G.extrudeZ([[AK.REAR_X, 36.4], [88, 33.6], [88, 36.2], [36, 39.4, 2], [AK.REAR_X, 39.8]], 17, { bevel: 0.5 }));
+  // щиток с U-образной прорезью: плечики прорези — линия прицеливания (вершина мушки вровень с ними)
+  const notch = [[-8.5, 35.2, 1], [8.5, 35.2, 1], [8.5, SY, 0.8], [1.5, SY, 0.2], [1.2, SY - 2.4, 0.5], [-1.2, SY - 2.4, 0.5], [-1.5, SY, 0.2], [-8.5, SY, 0.8]];
+  leaf.add(M, G.extrudeX(notch, AK.REAR_X, AK.REAR_X + 3.4, { bevel: 0.3 }));
+  leaf.add('steelWorn', G.extrudeZ([[58, 35.6], [70, 34.9], [70, 41.5, 1], [58, 42.2, 1]], 20, { bevel: 0.8 }));
+  leaf.add('steelWorn', G.T(G.cylZ(2.6, 10, 13, { seg: 14 }), { p: [64, 38.6, 0] }));
+  for (let i = 0; i < 6; i++) leaf.add('paintWhite', G.T(G.box(0.6, 0.2, 3), { p: [40 + i * 7.5, 39.1 - i * 0.4, 5] }));
   const leafNode = leaf.build('rearLeaf');
   // флажок-замыкатель газовой трубки справа на колодке
   k.add(M, G.extrudeZ([[82, 16, 1], [90, 16, 1], [100, 30, 2], [95, 33, 2]], 3, { bevel: 0.6, z: 14.4 }));
@@ -123,7 +126,7 @@ function barrelAndGas(ctx, k, o) {
   k.add(M, G.wire([[300, 4, -11], [300, 4, -18], [314, 4, -20], [320, 4, -11]], 1.8, { n: 30 }));
   // основание мушки: кольцо, намушник-«уши», мушка, штык-упор
   k.add(M, G.extrudeZ([[364, -11, 2], [404, -11, 2], [404, 10, 2], [398, 18, 3], [370, 18, 3], [364, 10, 2]], 20, { bevel: 1.4 }));
-  for (const s of [-1, 1]) k.add(M, G.extrudeZ([[372, 12], [396, 12], [394, 36, 3], [386, 46, 4], [379, 46, 3], [374, 34, 2]], 2.8, { bevel: 0.6, z: s * 7.4 }));
+  for (const s of [-1, 1]) k.add(M, G.extrudeZ([[372, 12], [396, 12], [394, 40, 3], [386, AK.SIGHT_Y + 8, 4], [379, AK.SIGHT_Y + 8, 3], [374, 38, 2]], 2.8, { bevel: 0.6, z: s * 7.4 }));
   k.add('steelWorn', G.cylY(1.9, 16, AK.SIGHT_Y - 1.2, { seg: 12 }), { p: [AK.FRONT_X, 0, 0] });
   k.add('steelWorn', G.extrudeZ([[AK.FRONT_X - 1.2, AK.SIGHT_Y - 2], [AK.FRONT_X + 1.2, AK.SIGHT_Y - 2], [AK.FRONT_X + 0.9, AK.SIGHT_Y, 0.3], [AK.FRONT_X - 0.9, AK.SIGHT_Y, 0.3]], 2.2, { bevel: 0.2 }));
   if (o.bayonet) k.add(M, G.extrudeZ([[366, -10], [398, -10], [398, -21, 2], [372, -21, 2]], 11, { bevel: 1 }));
@@ -258,9 +261,9 @@ function hgB10(ctx) {
   add('hgRight', 'right', [90, 0, 0], 70, [x1 - 78, -2, 31], 9.5);
   add('hgLeft', 'left', [-90, 0, 0], 70, [x1 - 78, -2, -31], 9.5);
   // Б-33: хомут на газовой трубке с верхней планкой
-  const top = AK.GAS_Y + 21;
+  const top = AK.GAS_Y + 19.4;
   k.add('alu', G.extrudeX(G.shape([[-13, 12, 2], [13, 12, 2], [13, top - 9.4, 3], [-13, top - 9.4, 3]], [G.circle(0, AK.GAS_Y, 9.3, 24)]), 108, 250, { bevel: 1.2 }));
-  const rr = G.picatinny(140, { base: 6 });
+  const rr = G.picatinny(140, { base: 9.8 });
   k.add('alu', rr.geo, { p: [109, top, 0] });
   mounts.push(ctx.railMount('gasRail', [109 + rr.first, top, 0], 'top', rr.slots, { axis: 'top' }));
   for (const x of [130, 228]) k.add('steel', G.T(G.cylZ(2.8, 12.5, 14.5, { seg: 6 }), { p: [x, AK.GAS_Y + 4, 0] }));
@@ -300,7 +303,7 @@ function coverTWS(ctx, o) {
   // усиленная крышка с планкой, шарнир в колодке целика
   const top = 41;
   k.add('alu', G.extrudeX(G.shape([[-15, 20, 2], [15, 20, 2], [15, top - 9.4, 2], [-15, top - 9.4, 2]]), -206, 12, { bevel: 1 }));
-  const r = G.picatinny(210, { base: 5 });
+  const r = G.picatinny(210, { base: 9.8 });
   k.add('alu', r.geo, { p: [-202, top, 0] });
   k.add('alu', G.extrudeX(G.shape([[-10, 22, 1], [10, 22, 1], [10, 32, 2], [-10, 32, 2]]), 10, 26, { bevel: 0.8 }));
   k.add('steel', G.T(G.cylZ(3, -12, 12, { seg: 16 }), { p: [20, 26, 0] }));
@@ -322,7 +325,7 @@ function sideMount(ctx) {
   k.add('alu', G.T(G.extrudeZ(riser, 8, { bevel: 1.2 }), { p: [0, 0, -5] }));
   const top = 58, cz = 19;
   k.add('alu', G.extrudeX(G.shape([[-6, 42, 2], [cz + 11, 42, 2], [cz + 11, top - 9, 2], [-6, top - 9, 2]]), -52, 52, { bevel: 1 }));
-  const r = G.picatinny(104, { base: 5 });
+  const r = G.picatinny(104, { base: 9.4 });
   k.add('alu', r.geo, { p: [-52, top, cz] });
   const m = ctx.railMount('sideRail', [-52 + r.first, top, cz], 'top', r.slots, { axis: 'top' });
   return { root: G.node('sidemount', [k.build(), m]) };
@@ -488,8 +491,9 @@ export function akMag(ctx, o) {
   k.add(o.plate || o.mat, G.T(G.box(D1 + 7, 6, W + 3, { bevel: 1.6 }), { p: [ex + tx * 2, ey + ty * 2, 0], r: [0, 0, endA * 57.3] }));
   k.add(o.mat, G.T(G.box(8, 6, W - 6), { p: [2, 8, 0] }));
   k.add(o.mat, G.T(G.box(6, 5, W - 4), { p: [-D0 + 4, 9, 0] }));
-  // верхние патроны
+  // верхние патроны в подающих губках
   const cal = o.cal;
+  ctx.C.feedLips(k, o.mat, -D0 + 6, -D0 + 42, 12, W / 2, { rise: 5.2, curl: 3.4 });
   ctx.C.cartridge(rk, cal, { p: [-D0 + 8, 13.5, -3.4], r: [0, 0, 3] });
   ctx.C.cartridge(rk, cal, { p: [-D0 + 8, 7, 3.4], r: [0, 0, 3] });
   const rounds = rk.build('rounds');

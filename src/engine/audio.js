@@ -3,6 +3,8 @@
 // Дульное устройство меняет каждый слой: глушитель срезает дульную волну
 // на ~25 дБ и верх спектра, тормоз делает выстрел громче и резче.
 
+import { Foley } from './foley.js';
+
 const CAL = {
   '556': { blastF: 7200, blastT: 0.075, bodyF: 150, bodyT: 0.09, body: 0.55, crack: 0.9, level: 1.0, mechF: 3400 },
   '545': { blastF: 7600, blastT: 0.07, bodyF: 140, bodyT: 0.09, body: 0.55, crack: 0.95, level: 1.0, mechF: 2900 },
@@ -49,6 +51,9 @@ export class GunAudio {
     this.noise = this.noiseBuf(1.5, 'white');
     this.pink = this.noiseBuf(1.5, 'pink');
     this.crackBuf = this.nwave();
+    // буферы механики готовим в простое, чтобы первая перезарядка не дёргала кадр
+    const idle = window.requestIdleCallback || ((f) => setTimeout(f, 200));
+    idle(() => this.warm());
   }
 
   setMuted(m) {
@@ -242,56 +247,39 @@ export class GunAudio {
     }
   }
 
-  dryFire() {
+  // Механика и перезарядка — синтезированные буферы (foley.js): без тональных «звонов».
+  play(name, o = {}) {
     if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
-    this.clank(t, 3800, 0.2, 0.02, 7, 1, 0.1);
-    this.thud(t + 0.004, 900, 0.1, 0.03);
+    const c = this.ctx;
+    if (!this.foley) this.foley = new Foley(c);
+    const P = this.profile;
+    const s = c.createBufferSource();
+    s.buffer = this.foley.buffer(name, { fam: P.family, cal: P.cal, kind: o.kind });
+    s.playbackRate.value = 0.96 + Math.random() * 0.08;
+    const g = c.createGain(); g.gain.value = (o.gain ?? 1) * 0.9;
+    s.connect(g);
+    this.out(g, o.wet ?? 0.07, o.pan ?? 0.12);
+    s.start(c.currentTime + (o.delay || 0));
   }
 
-  selector() { if (!this.ctx || this.muted) return; const t = this.ctx.currentTime; this.clank(t, 4200, 0.18, 0.018, 8, 1, 0.2); this.clank(t + 0.03, 3000, 0.1, 0.015, 8, 1, 0.2); }
-  click() { if (!this.ctx || this.muted) return; const t = this.ctx.currentTime; this.clank(t, 5200, 0.1, 0.012, 9, 1, 0); }
-
-  magOut(kind = 'steel') {
-    if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime, poly = kind !== 'steel';
-    this.clank(t, 2800, 0.24, 0.03, 5, 1, 0.2);
-    this.slide(t + 0.02, 2200, 900, 0.18, 0.12, 0.2);
-    if (poly) this.thud(t + 0.1, 1200, 0.14, 0.05, 0.2); else this.clank(t + 0.1, 1700, 0.12, 0.05, 4, 2, 0.2);
+  dryFire() { this.play('dryFire', { gain: 0.7 }); }
+  selector() { this.play('selector', { gain: 0.8 }); }
+  click() { this.play('click', { gain: 0.6, pan: 0 }); }
+  magOut(kind = 'steel') { this.play('magOut', { kind, gain: 0.95 }); }
+  magInsert(kind = 'steel') { this.play('magInsert', { kind, gain: 0.85 }); }
+  magIn(kind = 'steel') { this.play('magIn', { kind, gain: 1.1 }); }
+  magDropGround(kind = 'steel') { this.play('magGround', { kind, gain: 0.7, pan: 0.3, wet: 0.12 }); }
+  chargeBack() { this.play('chargeBack', { gain: 0.95 }); }
+  chargeRelease() { this.play('chargeRelease', { gain: 1.05 }); }
+  boltCatch() { this.play('boltCatch', { gain: 1.05 }); }
+  // заранее синтезировать буферы (вызывается при первом взаимодействии)
+  warm() {
+    if (!this.ctx) return;
+    if (!this.foley) this.foley = new Foley(this.ctx);
+    const P = this.profile, o = { fam: P.family, cal: P.cal };
+    for (const n of ['magOut', 'magInsert', 'magIn', 'magGround']) for (const kind of ['steel', 'poly']) this.foley.buffer(n, { ...o, kind });
+    for (const n of ['chargeBack', 'chargeRelease', 'boltCatch', 'dryFire', 'selector', 'click']) this.foley.buffer(n, o);
   }
-
-  magIn(kind = 'steel') {
-    if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime, poly = kind !== 'steel';
-    this.slide(t, 700, 2000, 0.16, 0.1, 0.2);
-    if (poly) this.thud(t + 0.1, 1500, 0.3, 0.05, 0.2);
-    this.clank(t + 0.1, poly ? 2200 : 2900, 0.34, 0.04, 5, 2, 0.2);
-    this.clank(t + 0.13, 4100, 0.16, 0.02, 8, 1, 0.2);
-  }
-
-  magDropGround(kind = 'steel') {
-    if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
-    this.thud(t, 500, 0.25, 0.08, 0.3);
-    if (kind === 'steel') this.clank(t + 0.005, 1400, 0.1, 0.06, 3, 2, 0.3);
-  }
-
-  chargeBack() {
-    if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
-    this.clank(t, 2400, 0.2, 0.025, 5, 1, 0.2);
-    this.slide(t + 0.01, 1300, 3600, 0.22, 0.13, 0.2);
-  }
-
-  chargeRelease() {
-    if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
-    this.slide(t, 3200, 1400, 0.2, 0.06, 0.2);
-    this.clank(t + 0.06, 2600, 0.5, 0.05, 5, 3, 0.15);
-    this.clank(t + 0.075, 4500, 0.2, 0.02, 8, 1, 0.15);
-  }
-
-  boltCatch() { if (!this.ctx || this.muted) return; const t = this.ctx.currentTime; this.clank(t, 3600, 0.3, 0.02, 7, 1, -0.1); this.chargeRelease(); }
 
   // Установка модуля: щелчки прижима или храповик резьбы.
   attach(kind) {

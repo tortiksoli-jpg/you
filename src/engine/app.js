@@ -45,7 +45,7 @@ export async function boot(def, lib) {
   const asm = new Assembler(def, lib, ctx);
   const base = asm.base;
   const audio = new GunAudio();
-  audio.profile = { ...def.audio, rpm: def.base.rpm };
+  audio.profile = { ...def.audio, rpm: def.base.rpm, family: def.id.startsWith('ak') ? 'ak' : def.id };
   const fx = new FX(S.scene, mats);
   const tw = new Tweens();
 
@@ -134,6 +134,7 @@ export async function boot(def, lib) {
     if (magObj) { magObj.visible = st.magIn; magObj.position.y = 0; magObj.rotation.z = 0; }
     buildSights();
     if (ui) ui.refresh();
+    app?.invalidate?.();
   }
 
   // Прицельные системы: оптика (+ увеличитель), затем механика.
@@ -160,13 +161,18 @@ export async function boot(def, lib) {
     // механика: целик + мушка
     let rear = null, front = null;
     const pts = (it, key) => { const v = it.info?.irons?.[key]; if (!v) return null; return new THREE.Vector3(...v).applyMatrix4(toRoot(it.obj, gun)); };
-    for (const it of asm.installed.values()) { rear = rear || pts(it, 'rear'); front = front || pts(it, 'front'); }
+    let rearIt = null;
+    for (const it of asm.installed.values()) {
+      if (!rear && (rear = pts(it, 'rear'))) rearIt = it;
+      front = front || pts(it, 'front');
+    }
     if (base.irons?.rear && !rear) rear = new THREE.Vector3(...base.irons.rear);
     if (base.irons?.front && !front) front = new THREE.Vector3(...base.irons.front);
     const opticFolds = !!opt && [...asm.installed.values()].some((it) => it.info?.flip);
     if (rear && front && !opticFolds) {
       const dir = front.clone().sub(rear).normalize();
-      sights.push({ id: 'irons', label: 'Механический прицел', eye: rear, dir, mag: 1, irons: true, x0: rear.x });
+      const type = rearIt ? rearIt.info.irons.type || 'aperture' : base.irons?.type || 'notch';
+      sights.push({ id: 'irons', label: 'Механический прицел', eye: rear, dir, mag: 1, irons: true, type, rearObj: rearIt?.obj || null, x0: rear.x });
     }
     // только что установленный прицел становится активным
     const optNow = sights.find((s) => s.id === 'optic')?.label || null;
@@ -203,6 +209,8 @@ export async function boot(def, lib) {
     // положение глаза: у щеки на прикладе или по удалению выходного зрачка
     let ex = base.eyeX ?? -240;
     if (s.eyeRelief) ex = s.eye.x - s.eyeRelief;
+    // диоптр: глаз в ~75 мм за кольцом (кольцо обрамляет мушку); прорезь: у щеки, не ближе 220 мм
+    else if (s.irons) ex = s.type === 'aperture' ? s.eye.x - 75 : Math.min(ex, s.eye.x - 220);
     else if (!s.irons) ex = Math.min(ex, s.eye.x - 60);
     const t = (ex - s.eye.x) / (s.dir.x || 1);
     const eyeGun = s.eye.clone().addScaledVector(s.dir, t);
@@ -221,7 +229,7 @@ export async function boot(def, lib) {
   }
 
   // ---------------------------------------------------------------- стрельба
-  const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), tq = new THREE.Quaternion();
+  const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), tq = new THREE.Quaternion(), mzTmp = new THREE.Vector3();
   function muzzleWorld(out, dir) {
     const mz = asm.mounts.get('muzzle');
     const len = asm.info('muzzle')?.muzzle?.x || 0;
@@ -342,9 +350,12 @@ export async function boot(def, lib) {
     st.mag = st.cap;
     const mi = asm.info('mag')?.mag;
     if (mi?.rounds) mi.rounds.visible = true;
+    // касание шахты — примерно на 60% хода (кривая с замедлением)
+    setTimeout(() => audio.magInsert(kind), 190);
     tw.add(m.position, 'y', 0, 0.35, (t) => 1 - Math.pow(1 - t, 3), () => {
-      const fin = () => { audio.magIn(kind); st.magIn = true; if (ui) ui.hud(); setTimeout(() => done && done(), 150); };
-      if (rock) tw.add(m.rotation, 'z', 0, 0.14, ease, fin); else fin();
+      const fin = () => { if (!rock) audio.magIn(kind); st.magIn = true; if (ui) ui.hud(); setTimeout(() => done && done(), 150); };
+      // АК: зацеп спереди, поворот назад до щелчка защёлки (щелчок в звуке — через 50 мс)
+      if (rock) { setTimeout(() => audio.magIn(kind), 90); tw.add(m.rotation, 'z', 0, 0.14, ease, fin); } else fin();
     });
   }
 
@@ -381,7 +392,7 @@ export async function boot(def, lib) {
           const p = gun.localToWorld(new THREE.Vector3(...ej.p));
           const d = new THREE.Vector3(...ej.dir).normalize().transformDirection(gun.matrixWorld).multiplyScalar(1.5);
           gun.getWorldQuaternion(tq);
-          fx.shell(p, d, def.cal, tq);
+          fx.shell(p, d, def.cal, tq, true);
         }
         st.chambered = false;
       }
@@ -639,8 +650,36 @@ export async function boot(def, lib) {
 
   function applyViewOffset() {
     const o = Math.round(st.viewOff || 0);
+    if (o === lastViewOff) return;
+    lastViewOff = o;
+    camDirty = true;
     if (Math.abs(o) < 1) { if (S.camera.view) S.camera.clearViewOffset(); return; }
     S.camera.setViewOffset(innerWidth, innerHeight, -o, 0, innerWidth, innerHeight);
+  }
+  let lastViewOff = null;
+  addEventListener('resize', () => { lastViewOff = null; });
+
+  // Расфокус целика-диоптра: глаз сфокусирован на мушке, кольцо размыто и
+  // «просвечивает». Материалы клонируются только на время прицеливания.
+  let defocused = null;
+  function restoreFocus() {
+    defocused?.traverse((m) => { if (m.userData.sharpMat) { m.material.dispose(); m.material = m.userData.sharpMat; delete m.userData.sharpMat; } });
+    defocused = null;
+  }
+  function defocus(obj, k) {
+    if (defocused && defocused !== obj) restoreFocus();
+    if (!obj || k < 0.01) { if (defocused) restoreFocus(); return; }
+    defocused = obj;
+    obj.traverse((m) => {
+      if (!m.isMesh || m.userData.reticle) return;
+      if (!m.userData.sharpMat) {
+        m.userData.sharpMat = m.material;
+        m.material = m.material.clone();
+        m.material.transparent = true;
+        m.material.depthWrite = false;
+      }
+      m.material.opacity = 1 - 0.55 * k;
+    });
   }
 
   function update(dt) {
@@ -704,6 +743,7 @@ export async function boot(def, lib) {
         ui?.nv(nv);
         // ЭОП непрозрачен: вместо трубы монокуляра — полное поле изображения под виньеткой окуляра
         for (const q of sights) if (q.hide) q.hide.visible = !(nv && q === p.s);
+        defocus(p.s.irons && p.s.type === 'aperture' ? p.s.rearObj : null, e);
       }
       if (!st.ads && st.adsT === 0) { controls.enabled = true; }
     } else {
@@ -715,6 +755,7 @@ export async function boot(def, lib) {
       ui?.scope(null, null);
       ui?.nv(false);
       for (const q of sights) if (q.hide) q.hide.visible = true;
+      if (defocused) restoreFocus();
       controls.enabled = true;
       controls.target.lerp(focusTarget, 1 - Math.pow(0.02, dt));
       if (focusDist) {
@@ -741,7 +782,7 @@ export async function boot(def, lib) {
       fx.setLaser(true, p, dv, S.range.hitables);
     } else fx.setLaser(false);
 
-    fx.update(dt, (s) => audio.casing(0, s.steel, 0.8));
+    fx.update(dt, (s, n) => audio.casing(0, s.steel, n > 1 ? 0.35 : 0.8), S.camera, fx.heat > 0.3 ? muzzleWorld(mzTmp) : null);
     S.range.update(dt);
   }
 
@@ -788,12 +829,70 @@ export async function boot(def, lib) {
   if (bootEl) bootEl.classList.add('off');
   window.__app = app;
 
+  // ---------------------------------------------------------- производительность
+  // Кадр рисуется только когда что-то изменилось; карта теней пересчитывается,
+  // только если сдвинулись отбрасывающие тень объекты (вращение камеры — нет).
+  // Разрешение подстраивается под фактический FPS (на мощных ПК не снижается).
+  const R = S.renderer;
+  R.shadowMap.autoUpdate = false;
+  R.shadowMap.needsUpdate = true;
+  let camDirty = true, sceneDirty = true, idleT = 0;
+
+  controls.addEventListener('change', () => { camDirty = true; });
+  addEventListener('resize', () => { camDirty = true; sceneDirty = true; });
+  app.invalidate = () => { sceneDirty = true; };
+  const maxDpr = Math.min(devicePixelRatio || 1, 2);
+  const minDpr = Math.max(0.6, maxDpr * 0.55);
+  let activeDpr = maxDpr, curDpr = maxDpr, fts = [], ftT = 0, slowStreak = 0;
+  const bootT = performance.now();
+  const gunPrev = new THREE.Matrix4();
+  const setDpr = (v) => { if (Math.abs(v - curDpr) < 0.01) return; curDpr = v; R.setPixelRatio(v); R.setSize(innerWidth, innerHeight); };
+  function simBusy() {
+    const r = st.rec;
+    if (st.ads || st.adsT > 0 || st.trigger || st.busy || st.light || st.laser || tw.list.length || fx.active()) return true;
+    if (Math.abs(r.p) + Math.abs(r.y) + Math.abs(r.z) + Math.abs(r.vp) + Math.abs(r.vy) + Math.abs(r.vz) > 1e-3 || st.climb > 1e-4) return true;
+    for (const t of S.range.targets) if (Math.abs(t.userData.vel) + Math.abs(t.userData.swing) > 1e-4) return true;
+    return false;
+  }
+  // Медиана интервалов кадров за 1,5 с активности; разовые подвисания (компиляция
+  // шейдеров, GC) не учитываются. Неподвижная картинка всегда в полном разрешении.
+  function adapt(raw) {
+    if (performance.now() - bootT < 3000) return;
+    if (raw < 0.25) fts.push(raw);
+    ftT += raw;
+    if (ftT < 1.5 || fts.length < 10) return;
+    fts.sort((a, b) => a - b);
+    const med = fts[fts.length >> 1];
+    fts = []; ftT = 0;
+    let next = activeDpr;
+    if (med > 1 / 40) { slowStreak++; next = Math.max(minDpr, activeDpr * (med > 1 / 25 ? 0.8 : 0.9)); } else { slowStreak = 0; if (med < 1 / 55) next = Math.min(maxDpr, activeDpr * 1.1); }
+    // совсем слабая видеокарта: тени попроще вместо дальнейшей потери чёткости
+    if (slowStreak >= 3 && activeDpr <= minDpr + 1e-3 && S.sun.shadow.mapSize.x > 1024) {
+      S.sun.shadow.mapSize.set(1024, 1024); S.sun.shadow.map?.dispose(); S.sun.shadow.map = null; R.shadowMap.needsUpdate = true;
+    }
+    activeDpr = next;
+  }
+  app.quality = () => ({ activeDpr, curDpr, maxDpr, shadow: S.sun.shadow.mapSize.x });
+
   const loop = () => {
     requestAnimationFrame(loop);
     if (window.__pause) return;
-    const dt = Math.min(clock.getDelta(), 0.05);
+    const raw = clock.getDelta();
+    const dt = Math.min(raw, 0.05);
     update(dt);
-    S.renderer.render(S.scene, S.camera);
+    const busy = simBusy();
+    const active = busy || camDirty;
+    idleT = active ? 0 : idleT + raw;
+    // после паузы — один чёткий кадр в полном разрешении
+    const still = !active && idleT > 0.35 && curDpr !== maxDpr;
+    if (!active && !sceneDirty && !still) return;
+    if (active) { setDpr(activeDpr); adapt(raw); } else { setDpr(maxDpr); fts = []; ftT = 0; }
+    // тени: только если сдвинулось оружие/гильзы/мишени или сменилась сборка
+    gun.updateMatrixWorld();
+    if (busy || sceneDirty || !gunPrev.equals(gun.matrixWorld)) R.shadowMap.needsUpdate = true;
+    gunPrev.copy(gun.matrixWorld);
+    camDirty = false; sceneDirty = false;
+    R.render(S.scene, S.camera);
   };
   loop();
   return app;

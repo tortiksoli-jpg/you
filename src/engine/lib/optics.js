@@ -269,9 +269,9 @@ function mbusRear(ctx) {
   k.add('poly', G.extrudeZ([[-13, 5], [13, 5], [13, 11, 3], [-13, 11, 3]], 30, { bevel: 1.5 }));
   // створка с двумя диоптрами (большой и малый)
   const leaf = G.shape([[-4, 0, 1], [4, 0, 1], [4, 44, 3], [-4, 44, 3]].map(([x, y, r]) => [x, y, r]));
-  f.add('poly', G.extrudeZ(G.shape([[-3.5, 0, 1], [3.5, 0, 1], [3.5, 42, 2], [-3.5, 42, 2]]), 26, { bevel: 1.2 }).translate(0, 0, 0));
+  // створка со сквозным отверстием диоптра (сечение в плоскости z-y)
+  f.add('poly', G.extrudeX(G.shape([[-13, 0, 1], [13, 0, 1], [13, 42, 3], [-13, 42, 3]], [G.circle(0, 29.5, 2.7, 24)]), -3.5, 3.5, { bevel: 1 }));
   f.add('poly', G.T(G.tubeX(8, 2.6, -2.5, 2.5, { seg: 28 }), { p: [0, 29.5, 0] }));
-  f.add('lensBlack', G.T(G.cylX(2.4, -4, 4, { seg: 16 }), { p: [0, 29.5, 0] }));
   f.add('poly', G.T(G.cylZ(5, 12, 17, { c: 0.8, seg: 20 }), { p: [0, 22, 0] }));
   const flip = G.node('flip', [f.build()]);
   flip.position.set(4, 10, 0);
