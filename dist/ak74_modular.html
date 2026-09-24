@@ -192,6 +192,11 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import * as THREE from "three";
 import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUniformsLib.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 var GUN_Y = 1.42;
 var RANGE = { back: -4.2, end: 102, halfW: 6, ceil: 3.6, line: 0.62 };
 var LUX = 1 / 200;
@@ -361,6 +366,7 @@ function envScene(night) {
   if (!night) {
     for (const x of [4, 8, 12, 16, 20, 24]) plane(0.25, 9, 16774114, 9, x, RANGE.ceil - GUN_Y - 0.05, 0);
     for (const x of [-2.6, -0.9]) for (const z of [-2.4, 0, 2.4]) plane(1.2, 0.6, 16774114, 8, x, RANGE.ceil - GUN_Y - 0.06, z);
+    for (let x = 3; x < 30; x += 4) plane(1.5, 9, 14674679, 5, x + 1.65, RANGE.ceil - GUN_Y + 0.3, 0);
   } else {
     plane(0.5, 0.2, 4259712, 2.5, RANGE.back + 0.05, 2.3 - GUN_Y, -3, 0).rotation.y = Math.PI / 2;
   }
@@ -384,12 +390,12 @@ function createScene(canvasHost) {
   const envDay = pmrem.fromScene(envScene(false), 0.035).texture;
   const envNight = pmrem.fromScene(envScene(true), 0.035).texture;
   scene.environment = envDay;
-  scene.environmentIntensity = 0.8;
+  scene.environmentIntensity = 1.05;
   scene.fog = new THREE.FogExp2(7828847, 45e-4);
   const hemi = new THREE.HemisphereLight(16774374, 6117970, 0.5);
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(16773856, 2.1);
-  sun.position.set(-0.9, 5.5, 0.9);
+  sun.position.set(-0.7, RANGE.ceil - 0.15, 0.7);
   sun.target.position.set(0, GUN_Y, 0);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -398,8 +404,8 @@ function createScene(canvasHost) {
   sc.right = 1.1;
   sc.top = 1.1;
   sc.bottom = -1.1;
-  sc.near = 1;
-  sc.far = 12;
+  sc.near = 0.2;
+  sc.far = 6;
   sun.shadow.bias = -4e-4;
   sun.shadow.normalBias = 0.012;
   scene.add(sun, sun.target);
@@ -411,15 +417,68 @@ function createScene(canvasHost) {
   down.position.set(-10, 20, 3);
   down.target.position.set(40, 0, 0);
   scene.add(down, down.target);
-  const fill = new THREE.DirectionalLight(16774374, 0.35);
+  const fill = new THREE.DirectionalLight(16774374, 0.7);
   fill.position.set(0.5, 0.6, 3);
   fill.target.position.set(0, GUN_Y, 0);
   scene.add(fill, fill.target);
   const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 8e-3, 400);
   camera.position.set(-0.25, GUN_Y + 0.25, 1.35);
   const range = buildRange(scene);
-  const DAY = { hemi: 0.5, sun: 2.1, area: 5.5, down: 1.3, fill: 0.35, env: 0.8, fog: 7828847 };
-  const NIGHT = { hemi: 4e-3, sun: 0, area: 0, down: 0, fill: 15e-4, env: 1, fog: 263173 };
+  const sunDir = new THREE.Vector3(0.22, -1, -0.62).normalize();
+  const sky = new THREE.DirectionalLight(16773336, 7);
+  sky.position.set(49, 0, 0).addScaledVector(sunDir, -30);
+  sky.target.position.set(49, 0, 0);
+  sky.castShadow = true;
+  sky.shadow.mapSize.set(4096, 4096);
+  Object.assign(sky.shadow.camera, { left: -76, right: 76, top: 76, bottom: -76, near: 1, far: 70 });
+  sky.shadow.bias = -6e-4;
+  sky.shadow.normalBias = 0.03;
+  scene.add(sky, sky.target);
+  const shaftU = { uCol: { value: new THREE.Color(16773336).multiplyScalar(0.05) }, uTime: { value: 0 } };
+  const shaftM = new THREE.ShaderMaterial({
+    uniforms: shaftU,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    vertexShader: "varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }",
+    fragmentShader: `uniform vec3 uCol; uniform float uTime; varying vec3 vW;
+      float h3(vec3 p){ p = fract(p*0.3183099+0.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+      float n3(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.-2.*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),f.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),f.x),f.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),f.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),f.x),f.y),f.z); }
+      void main(){
+        float h = clamp(vW.y / ${RANGE.ceil.toFixed(1)}, 0., 1.);
+        float d = 0.55 + 0.9 * n3(vW * 1.7 + vec3(0., uTime * 0.03, 0.));
+        vec3 c = uCol * d * (0.35 + 0.65 * h);
+        gl_FragColor = vec4(c, 1.);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`
+  });
+  {
+    const G2 = [];
+    const t = RANGE.ceil / -sunDir.y;
+    for (const [x0, x1, z0, z1] of range.skylights) {
+      const top = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]].map(([x, z]) => new THREE.Vector3(x, RANGE.ceil, z));
+      const bot = top.map((v) => v.clone().addScaledVector(sunDir, t));
+      const pos = [];
+      for (let i = 0; i < 4; i++) {
+        const a = top[i], b = top[(i + 1) % 4], c = bot[(i + 1) % 4], d = bot[i];
+        pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, a.x, a.y, a.z, c.x, c.y, c.z, d.x, d.y, d.z);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      G2.push(g);
+    }
+    const shafts = new THREE.Mesh(mergeGeometries(G2), shaftM);
+    shafts.renderOrder = 1;
+    shafts.userData.noAO = true;
+    shafts.frustumCulled = false;
+    scene.add(shafts);
+  }
+  const DAY = { hemi: 0.5, sun: 2.1, area: 5.5, down: 0.9, fill: 0.7, env: 1.05, fog: 7828847, sky: 7, shaft: 0.04 };
+  const NIGHT = { hemi: 5e-3, sun: 0, area: 0, down: 0, fill: 15e-4, env: 1, fog: 263173, sky: 0.03, shaft: 2e-3 };
   let night = false;
   const setNight = (on) => {
     night = !!on;
@@ -434,15 +493,51 @@ function createScene(canvasHost) {
     scene.environment = night ? envNight : envDay;
     scene.environmentIntensity = P.env;
     scene.fog.color.set(P.fog);
+    sky.intensity = P.sky;
+    sky.color.set(night ? 10335456 : 16773336);
+    shaftU.uCol.value.copy(sky.color).multiplyScalar(P.shaft);
     range.setNight(night);
   };
-  const ambient = () => night ? 4e-3 : 2.2;
+  const ambient = () => night ? 4e-3 : 2.6;
+  const rt = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), { type: THREE.HalfFloatType, stencilBuffer: true, depthBuffer: true, samples: 4 });
+  const composer = new EffectComposer(renderer, rt);
+  composer.addPass(new RenderPass(scene, camera));
+  const gtao = new GTAOPass(scene, camera, innerWidth, innerHeight);
+  gtao.overrideVisibility = function() {
+    const cache2 = this._visibilityCache;
+    this.scene.traverse((o) => {
+      cache2.set(o, o.visible);
+      const m = o.material;
+      if (o.isPoints || o.isLine || o.isSprite || o.userData.noAO || o.userData.reticle || m && (m.transparent || m.isShaderMaterial)) o.visible = false;
+    });
+  };
+  gtao.updateGtaoMaterial({ radius: 0.07, distanceExponent: 1.4, thickness: 1.2, scale: 1.1, samples: 16, distanceFallOff: 1, screenSpaceRadius: false });
+  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+  gtao.blendIntensity = 0.85;
+  composer.addPass(gtao);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.25, 0.45, 1.2);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+  const post = { composer, gtao, bloom };
+  const render = () => {
+    shaftU.uTime.value = performance.now() / 1e3;
+    const e = renderer.toneMappingExposure;
+    bloom.threshold = 1.15 / e;
+    bloom.strength = night ? 0.55 : 0.22;
+    gtao.blendIntensity = night ? 0.4 : 0.85;
+    composer.render();
+  };
+  const resize = () => {
+    composer.setPixelRatio(renderer.getPixelRatio());
+    composer.setSize(innerWidth, innerHeight);
+  };
   addEventListener("resize", () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
+    resize();
   });
-  return { renderer, scene, camera, sun, range, env: envDay, setNight, ambient, get night() {
+  return { renderer, scene, camera, sun, range, env: envDay, setNight, ambient, render, resize, post, get night() {
     return night;
   } };
 }
@@ -519,18 +614,55 @@ function buildRange(scene) {
   gap.position.set(back + 0.065, 6e-3, -3);
   gap.rotation.y = Math.PI / 2;
   grp.add(gap);
-  const ceilMesh = new THREE.Mesh(new THREE.PlaneGeometry(L, halfW * 2), new THREE.MeshStandardMaterial({ color: 2039842, roughness: 0.95 }));
+  const skylights = [];
+  for (let x = 3; x < 30; x += 4) skylights.push([x + 0.9, x + 2.4, -4.5, 4.5]);
+  const cs = new THREE.Shape();
+  cs.moveTo(back, -halfW);
+  cs.lineTo(end, -halfW);
+  cs.lineTo(end, halfW);
+  cs.lineTo(back, halfW);
+  cs.closePath();
+  for (const [x0, x1, z0, z1] of skylights) {
+    const h = new THREE.Path();
+    h.moveTo(x0, z0);
+    h.lineTo(x0, z1);
+    h.lineTo(x1, z1);
+    h.lineTo(x1, z0);
+    h.closePath();
+    cs.holes.push(h);
+  }
+  const ceilMesh = new THREE.Mesh(new THREE.ShapeGeometry(cs), new THREE.MeshStandardMaterial({ color: 2039842, roughness: 0.95 }));
   ceilMesh.rotation.x = Math.PI / 2;
-  ceilMesh.position.set(cx, ceil, 0);
+  ceilMesh.position.y = ceil;
+  ceilMesh.castShadow = true;
   add(ceilMesh, "concrete");
+  const curbM = new THREE.MeshStandardMaterial({ color: 9277329, roughness: 0.6, metalness: 0.4 });
+  const curbG = [], paneG = [];
+  for (const [x0, x1, z0, z1] of skylights) {
+    const H = 0.45, xm = (x0 + x1) / 2, zm = (z0 + z1) / 2;
+    curbG.push(new THREE.BoxGeometry(x1 - x0 + 0.1, H, 0.05).translate(xm, ceil + H / 2, z0 - 0.025));
+    curbG.push(new THREE.BoxGeometry(x1 - x0 + 0.1, H, 0.05).translate(xm, ceil + H / 2, z1 + 0.025));
+    curbG.push(new THREE.BoxGeometry(0.05, H, z1 - z0).translate(x0 - 0.025, ceil + H / 2, zm));
+    curbG.push(new THREE.BoxGeometry(0.05, H, z1 - z0).translate(x1 + 0.025, ceil + H / 2, zm));
+    for (let i = 1; i < 6; i++) curbG.push(new THREE.BoxGeometry(x1 - x0, 0.06, 0.05).translate(xm, ceil + H - 0.03, z0 + (z1 - z0) * i / 6));
+    curbG.push(new THREE.BoxGeometry(0.05, 0.06, z1 - z0).translate(xm, ceil + H - 0.03, zm));
+    paneG.push(new THREE.PlaneGeometry(x1 - x0, z1 - z0).rotateX(Math.PI / 2).translate(xm, ceil + H, zm));
+  }
+  const curbs = new THREE.Mesh(mergeGeometries(curbG), curbM);
+  curbs.castShadow = true;
+  grp.add(curbs);
+  const skyM = new THREE.MeshBasicMaterial({ color: 14674679 });
+  skyM.color.multiplyScalar(5);
+  grp.add(new THREE.Mesh(mergeGeometries(paneG), skyM));
   const wt = woodTex();
   wt.repeat.set(6, 1);
   const bafG = [], fixtures = [];
   for (let x = 3; x < end - 4; x += x < 30 ? 4 : 8) {
     bafG.push(new THREE.BoxGeometry(0.03, 1, halfW * 2 - 0.1).rotateZ(-0.52).translate(x, ceil - 0.5, 0));
-    fixtures.push(x + (x < 30 ? 2 : 4));
+    fixtures.push(x + (x < 30 ? 3.1 : 4));
   }
-  const baffles = new THREE.Mesh(mergeGeometries(bafG), new THREE.MeshStandardMaterial({ map: wt, roughness: 0.85 }));
+  const baffles = new THREE.Mesh(mergeGeometries(bafG), new THREE.MeshStandardMaterial({ map: wt, color: 9079434, roughness: 0.85 }));
+  baffles.castShadow = true;
   add(baffles, "wood");
   const fixM = new THREE.MeshStandardMaterial({ color: 2236962, emissive: 16774114, emissiveIntensity: 2.2, roughness: 0.4 });
   const housingM = new THREE.MeshStandardMaterial({ color: 10132896, roughness: 0.4, metalness: 0.7 });
@@ -551,6 +683,7 @@ function buildRange(scene) {
       const p = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.9), boothM);
       p.position.set(line - 0.85, 1.05, z);
       p.rotation.y = s > 0 ? Math.PI : 0;
+      p.userData.noShadow = true;
       grp.add(p);
     }
   }
@@ -701,7 +834,7 @@ function buildRange(scene) {
   addTarget(line + 100, -1, "ipsc", "100 м");
   addTarget(line + 100, 1.8, "plate");
   grp.traverse((o) => {
-    if (o.isMesh) o.receiveShadow = true;
+    if (o.isMesh) o.receiveShadow = !o.userData.noShadow;
   });
   const update = (dt) => {
     for (const t of targets) {
@@ -717,11 +850,12 @@ function buildRange(scene) {
   };
   const floorAt = (x, z) => x > line - 0.47 && x < line && Math.abs(z) < halfW - 0.1 ? 0.95 : 0;
   const setNight = (on) => {
+    skyM.color.set(on ? 858672 : 14674679).multiplyScalar(on ? 0.12 : 5);
     fixM.emissiveIntensity = on ? 0 : 2.2;
     gapM.color.set(16769712).multiplyScalar(on ? 0.08 : 0.3);
     exitM.emissiveIntensity = on ? 0.35 : 0.9;
   };
-  return { group: grp, targets, hitables, update, hit, floorAt, setNight, ground: floor };
+  return { group: grp, targets, hitables, update, hit, floorAt, setNight, ground: floor, skylights };
 }
 
 // src/engine/materials.js
@@ -839,6 +973,47 @@ function makeTextures() {
     woodWalnut: wood([92, 58, 36])
   };
 }
+var WEAR_GLSL = `
+varying vec3 vObjP;
+uniform float uWear, uWearMetal, uWearRough, uGrime;
+uniform vec3 uWearCol;
+float wH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float wN(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(wH(i), wH(i + vec3(1, 0, 0)), f.x), mix(wH(i + vec3(0, 1, 0)), wH(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(wH(i + vec3(0, 0, 1)), wH(i + vec3(1, 0, 1)), f.x), mix(wH(i + vec3(0, 1, 1)), wH(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}`;
+function addWear(mat, o) {
+  const U = {
+    uWear: { value: o.wear ?? 0.6 },
+    uWearMetal: { value: o.metal ?? mat.metalness },
+    uWearRough: { value: o.rough ?? 0.35 },
+    uGrime: { value: o.grime ?? 1 },
+    uWearCol: { value: new THREE2.Color(o.col ?? 9409174) }
+  };
+  mat.userData.wear = U;
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vObjP;").replace("#include <begin_vertex>", "#include <begin_vertex>\nvObjP = position;");
+    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\n" + WEAR_GLSL).replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>
+      {
+        vec3 nn = normalize(vNormal);
+        float px = max(length(fwidth(vViewPosition)), 1e-6);
+        float curv = length(fwidth(nn)) / px;               // 1/м
+        float brk = wN(vObjP * 0.45) * 0.65 + wN(vObjP * 2.1) * 0.35;
+        float edge = smoothstep(170.0, 750.0, curv) * smoothstep(0.3, 0.6, brk);
+        float m = clamp(edge * uWear, 0.0, 1.0);
+        diffuseColor.rgb = mix(diffuseColor.rgb, uWearCol, m);
+        metalnessFactor = mix(metalnessFactor, uWearMetal, m);
+        roughnessFactor = mix(roughnessFactor, uWearRough, m);
+        float g1 = wN(vObjP * 0.018 + 3.1), g2 = wN(vObjP * 0.06 + 11.7);
+        roughnessFactor = clamp(roughnessFactor * mix(1.0, 0.8 + 0.4 * g1, uGrime), 0.04, 1.0);
+        diffuseColor.rgb *= mix(1.0, 0.93 + 0.14 * g2, uGrime);
+      }`);
+  };
+  mat.customProgramCacheKey = () => "wear";
+  return mat;
+}
 function createMaterials(envMap) {
   const tex2 = makeTextures();
   const rep = (t, mm) => {
@@ -868,12 +1043,12 @@ function createMaterials(envMap) {
     normalScale: new THREE2.Vector2((o.ns ?? 0.45) * 0.55, (o.ns ?? 0.45) * 0.55),
     envMapIntensity: o.env ?? 0.8
   });
-  R4.steel = metal(2829358, 0.42, 0.8);
+  R4.steel = metal(2829358, 0.38, 0.82, { ns: 0.18, tile: 18 });
   R4.steelPark = metal(3487030, 0.62, 0.55, { cast: true, ns: 0.5 });
   R4.steelWorn = metal(5592666, 0.36, 0.9, { brushed: true });
   R4.steelBright = metal(10987949, 0.26, 1, { brushed: true });
   R4.chrome = metal(13224910, 0.14, 1);
-  R4.alu = metal(2039842, 0.46, 0.55, { ns: 0.25 });
+  R4.alu = metal(2039842, 0.44, 0.6, { ns: 0.14, tile: 16 });
   R4.aluGrey = metal(3882304, 0.44, 0.6, { ns: 0.25 });
   R4.aluFde = metal(7693130, 0.58, 0.25, { cast: true, ns: 0.35, env: 0.8 });
   R4.aluOd = metal(4999992, 0.6, 0.25, { cast: true });
@@ -936,11 +1111,34 @@ function createMaterials(envMap) {
   R4.lampLens = std({ color: 14542574, emissive: 16774108, emissiveIntensity: 0, roughness: 0.08, metalness: 0.2 });
   R4.laserLens = std({ color: 3346448, emissive: 16719888, emissiveIntensity: 0, roughness: 0.1 });
   R4.irLens = std({ color: 1381653, roughness: 0.05, metalness: 0.4 });
+  R4.ledPhos = std({ color: 13615226, emissive: 16774108, emissiveIntensity: 0, roughness: 0.45 });
+  R4.reflector = std({ color: 15132908, roughness: 0.22, metalness: 1, emissive: 16774108, emissiveIntensity: 0, side: THREE2.DoubleSide, envMapIntensity: 2.4 });
   R4.white = std({ color: 15263456, roughness: 0.5 });
   R4.paintRed = std({ color: 11805724, roughness: 0.5 });
   R4.paintWhite = std({ color: 14605266, roughness: 0.55 });
   R4.paper = std({ color: 15328211, roughness: 0.95 });
   R4.target = std({ color: 13617334, roughness: 0.6, metalness: 0.2 });
+  const W = {
+    steel: { col: 9343896, metal: 1, rough: 0.3, wear: 0.75 },
+    steelPark: { col: 7106161, metal: 0.9, rough: 0.38, wear: 0.55 },
+    steelWorn: { col: 11120050, metal: 1, rough: 0.28, wear: 0.5 },
+    alu: { col: 9146004, metal: 1, rough: 0.3, wear: 0.4 },
+    aluGrey: { col: 10132898, metal: 1, rough: 0.3, wear: 0.4 },
+    aluFde: { col: 9407622, metal: 0.95, rough: 0.35, wear: 0.45 },
+    aluOd: { col: 9407622, metal: 0.95, rough: 0.35, wear: 0.45 },
+    cast: { col: 8224642, metal: 0.95, rough: 0.35, wear: 0.35 },
+    poly: { col: 3815996, metal: 0, rough: 0.5, wear: 0.55 },
+    polySoft: { col: 3815996, metal: 0, rough: 0.6, wear: 0.35 },
+    polyFde: { col: 11047538, metal: 0, rough: 0.55, wear: 0.5 },
+    polyFdeDark: { col: 8153938, metal: 0, rough: 0.55, wear: 0.5 },
+    polyTan: { col: 11969151, metal: 0, rough: 0.55, wear: 0.5 },
+    polyOd: { col: 6974034, metal: 0, rough: 0.55, wear: 0.5 },
+    polyGrey: { col: 6448232, metal: 0, rough: 0.55, wear: 0.5 },
+    polyPlum: { col: 7224368, metal: 0, rough: 0.4, wear: 0.45 },
+    bakelite: { col: 9062954, metal: 0, rough: 0.35, wear: 0.4 },
+    rubber: { col: 3026479, metal: 0, rough: 0.7, wear: 0.2, grime: 0.6 }
+  };
+  for (const [k, o] of Object.entries(W)) if (R4[k]) addWear(R4[k], o);
   const cache2 = /* @__PURE__ */ new Map();
   return {
     tex: tex2,
@@ -953,6 +1151,7 @@ function createMaterials(envMap) {
       if (R4[base] && col) {
         const m = R4[base].clone();
         m.color = new THREE2.Color("#" + col);
+        if (W[base]) addWear(m, W[base]);
         cache2.set(key, m);
         return m;
       }
@@ -1453,6 +1652,7 @@ function loftY(rings, o = {}) {
     const nx = n.getX(i), ny = n.getY(i);
     n.setXY(i, ny, nx);
   }
+  for (let i = 0; i < n.count; i++) n.setXYZ(i, -n.getX(i), -n.getY(i), -n.getZ(i));
   return g;
 }
 function gripLoft(front, back, o = {}) {
@@ -1469,19 +1669,40 @@ function gripLoft(front, back, o = {}) {
   for (let i = 0; i <= N; i++) {
     const t = i / N, y = yTop + (yBot - yTop) * t;
     const xf = at(front, y), xb = at(back, y);
-    const cx = (xf + xb) / 2, a = Math.abs(xf - xb) / 2;
+    const cx = (xf + xb) / 2, a3 = Math.abs(xf - xb) / 2;
     const wk = o.width ? o.width(t) : 1;
     const end = i === N ? 0.9 : 1;
     const pts = [];
     for (let j = 0; j < M; j++) {
-      const th = j / M * Math.PI * 2, c = Math.cos(th), s = Math.sin(th);
-      const ex = Math.sign(c) * Math.pow(Math.abs(c), 2 / k), ez = Math.sign(s) * Math.pow(Math.abs(s), 2 / k);
-      const zk = 1 - taper * Math.max(0, c) ** 2;
-      pts.push([cx + a * ex * end, W * wk * zk * ez * end]);
+      const th = j / M * Math.PI * 2, c2 = Math.cos(th), s = Math.sin(th);
+      const ex = Math.sign(c2) * Math.pow(Math.abs(c2), 2 / k), ez = Math.sign(s) * Math.pow(Math.abs(s), 2 / k);
+      const zk = 1 - taper * Math.max(0, c2) ** 2;
+      pts.push([cx + a3 * ex * end, W * wk * zk * ez * end]);
     }
     rings.push({ y, pts });
   }
-  return loftY(rings, { crease: o.crease ?? 60 });
+  const g = loftY(rings, { crease: o.crease ?? 60 });
+  const p = g.attributes.position, nr = g.attributes.normal;
+  const c = new THREE3.Vector3(), a = new THREE3.Vector3(), b = new THREE3.Vector3(), d = new THREE3.Vector3(), f = new THREE3.Vector3();
+  for (let i = 0; i < p.count; i++) c.add(a.fromBufferAttribute(p, i));
+  c.divideScalar(p.count);
+  for (let t = 0; t < p.count; t += 3) {
+    a.fromBufferAttribute(p, t);
+    b.fromBufferAttribute(p, t + 1);
+    d.fromBufferAttribute(p, t + 2);
+    f.crossVectors(b.clone().sub(a), d.clone().sub(a));
+    if (f.dot(a.add(b).add(d).divideScalar(3).sub(c)) >= 0) continue;
+    for (const attr of [p, nr, g.attributes.uv]) {
+      if (!attr) continue;
+      for (let k2 = 0; k2 < attr.itemSize; k2++) {
+        const v = attr.array[(t + 1) * attr.itemSize + k2];
+        attr.array[(t + 1) * attr.itemSize + k2] = attr.array[(t + 2) * attr.itemSize + k2];
+        attr.array[(t + 2) * attr.itemSize + k2] = v;
+      }
+    }
+    for (let k2 = t; k2 < t + 3; k2++) nr.setXYZ(k2, -nr.getX(k2), -nr.getY(k2), -nr.getZ(k2));
+  }
+  return g;
 }
 function sideLoft(upper, lower, o = {}) {
   const at = (pts, x) => {
@@ -5005,7 +5226,10 @@ async function boot(def, lib) {
   const activeLight = () => lights.find((l) => (batt[devKey(l)] ?? 1) > 0) || null;
   const activeLaser = () => lasers.find((l) => (batt[devKey(l)] ?? 1) > 0) || null;
   function lensGlow(kl, kz) {
-    for (const l of lights) l.data.lens.material.emissiveIntensity = st.light ? 7 * kl : 0;
+    for (const l of lights) {
+      l.data.lens.material.emissiveIntensity = st.light ? 7 * kl : 0;
+      if (l.data.refl) l.data.refl.material.emissiveIntensity = st.light ? 0.9 * kl : 0;
+    }
     for (const l of lasers) l.data.lens.material.emissiveIntensity = st.laser ? 5 * kz : 0;
   }
   function drain(dt) {
@@ -5527,7 +5751,7 @@ async function boot(def, lib) {
     } else fx.setLaser(null);
     const amb = S.ambient();
     const Lsc = amb * 0.5 + beamE;
-    st.expTarget = clamp(Math.pow(1.1 / Math.max(1e-5, Lsc), 0.62), 0.32, 11);
+    st.expTarget = clamp(Math.pow(1.2 / Math.max(1e-5, Lsc), 0.62), 0.32, 11);
     const nvOn = document.body.classList.contains("nv");
     const tgt = st.expTarget * (nvOn ? 18 : 1);
     const tau = tgt > st.exposure ? 2.2 : 0.22;
@@ -5670,6 +5894,7 @@ async function boot(def, lib) {
     curDpr = v;
     R4.setPixelRatio(v);
     R4.setSize(innerWidth, innerHeight);
+    S.resize();
   };
   function simBusy() {
     const r = st.rec;
@@ -5729,7 +5954,7 @@ async function boot(def, lib) {
     gunPrev.copy(gun.matrixWorld);
     camDirty = false;
     sceneDirty = false;
-    R4.render(S.scene, S.camera);
+    S.render();
   };
   loop();
   return app;
@@ -5953,6 +6178,52 @@ function rmrOffset(ctx) {
     // прицельная ось задана в системе наклонной площадки: при прицеливании оружие заваливается на 45°
     sight: { node: cant, y: A, z: 0, x0: -22, x1: 15, r: 9, mag: 1, reticle: "dot", lens: glass }
   };
+}
+function cantOptic(ctx, name, body) {
+  const k = ctx.kit(), m = ctx.kit();
+  k.add("alu", clampBody(-13, 13, 5, { w: 24 }));
+  k.add("steel", crossBolt(0));
+  k.add("alu", extrudeX([[-12, 3, 1], [12, 3, 1], [31, 14, 3], [27, 22, 3], [6, 12, 3], [-12, 8, 2]], -13, 13, { bevel: 1.2 }));
+  for (const x of [-7, 7]) k.add("steel", T(cylX(1.9, 0, 1.4, { seg: 6 }).rotateY(Math.PI / 2), { p: [x, 17, 24] }));
+  m.add("alu", extrudeX(rrect(0, -1.5, 28, 5, 1.5), -24, 25, { bevel: 0.8 }));
+  const b = body(ctx, m);
+  const cant = node(name + "Cant", [m.build(), b.glass]);
+  cant.position.set(0, 16.5, 22);
+  cant.rotation.x = Math.PI / 4;
+  return {
+    root: node(name, [k.build(), cant]),
+    sight: { node: cant, y: b.A, z: 0, x0: b.x0, x1: b.x1, r: 9, mag: 1, reticle: b.reticle || "dot", lens: b.glass }
+  };
+}
+function dppBody(ctx, k) {
+  const A = 17;
+  k.add("alu", extrudeX(rrect(0, 4, 26, 8, 2), -24, 22, { bevel: 1.2 }));
+  k.add("alu", extrudeZ([[-24, 7], [-8, 7], [-8, 11], [-14, 13.5, 2], [-24, 12.5, 2]], 24, { bevel: 1.2 }));
+  const hood = shape([[-13, 7], [13, 7], [13, 22, 3], [8, 29, 5], [-8, 29, 5], [-13, 22, 3]], [[[-10, 8.6], [10, 8.6], [10, 21.5, 2], [6.5, 26.5, 4], [-6.5, 26.5, 4], [-10, 21.5, 2]]]);
+  k.add("alu", extrudeX(hood, 0, 17, { bevel: 1 }));
+  k.add("steel", T(box(10, 2.4, 20, { bevel: 0.6 }), { p: [8, 28.6, 0] }));
+  k.add("rubber", T(cylY(3, 11, 13.6, { seg: 16, c: 0.6 }), { p: [-18, 0, 0] }));
+  for (const s of [-1, 1]) k.add("steel", T(cylZ(2.2, 12.6, 13.6, { seg: 12 }), { p: [-4, 11, s > 0 ? 0 : -26.2] }));
+  const glass = lens(ctx, extrudeX(shape([[-9.6, 9], [9.6, 9], [9.6, 21, 2], [6, 26, 4], [-6, 26, 4], [-9.6, 21, 2]]), 11, 12, { bevel: 0.2 }), "glassAmber");
+  return { A, glass, x0: -24, x1: 17, reticle: "dot" };
+}
+function acroBody(ctx, k) {
+  const A = 16;
+  const sec = shape(rrect(0, 14, 30, 28, 5), [rrect(0, 16, 20, 17, 3)]);
+  k.add("alu", extrudeX(sec, -12, 16, { bevel: 1.4 }));
+  k.add("alu", extrudeX(rrect(0, 4, 30, 8, 2), -24, 16, { bevel: 1.2 }));
+  k.add("alu", extrudeZ([[-24, 7], [-12, 7], [-12, 20], [-18, 19, 3], [-24, 14, 3]], 26, { bevel: 1.4 }));
+  for (const s of [-1, 1]) k.add("rubber", T(box(6, 5, 1.6, { bevel: 0.6 }), { p: [-18, 12, s * 13.8] }));
+  k.add("steel", T(cylY(3.4, 1, 2, { seg: 20 }), { p: [-2, -1, 0] }));
+  const glass = lens(ctx, extrudeX(shape(rrect(0, 16, 20, 17, 3)), 12, 13, { bevel: 0.2 }), "glassBlue");
+  return { A, glass, x0: -12, x1: 16, reticle: "dot" };
+}
+function hs507Body(ctx, k) {
+  const A = rmrBody(ctx, k);
+  k.add("alu", T(box(16, 9, 2.2, { bevel: 0.8 }), { p: [-10, 5, 13.3] }));
+  k.add("steel", T(cylZ(1.5, 14.2, 15, { seg: 10 }), { p: [-15, 5, 0] }));
+  const glass = lens(ctx, extrudeX(shape(rrect(0, A + 0.5, 18.6, 13.4, 5)), 6, 7, { bevel: 0.2 }), "glassBlue");
+  return { A, glass, x0: -22, x1: 15, reticle: "cdot" };
 }
 function pvs14(ctx) {
   const k = ctx.kit(), f = ctx.kit();
@@ -6178,6 +6449,9 @@ var OPTICS = [
   { id: "mag3x", cat: "magnifier", name: "Aimpoint 3XMag-1 + FTS", desc: "Увеличитель 3×, откидывается вбок", foot: [-16, 16], body: [-57, 55], needs: mag1x39, stats: { weight: 330, ergo: -4, adsTime: 20 }, build: magnifier },
   { id: "pvs14", cat: "magnifier", name: "Монокуляр AN/PVS-14", desc: "ПНВ за коллиматором на откидном кронштейне (N — откинуть)", foot: [-16, 16], body: [-86, 60], needs: mag1x39, stats: { weight: 420, ergo: -6, adsTime: 25 }, build: pvs14 },
   { id: "rmr_off", cat: "offset", side: true, name: "Trijicon RMR на 45° кронштейне", desc: "Мини-коллиматор сбоку для ближнего боя: V — переключиться, оружие заваливается", foot: [-12, 12], body: [-23, 24], stats: { weight: 95, ergo: -1 }, build: rmrOffset },
+  { id: "dpp_off", cat: "offset", side: true, name: "Leupold DeltaPoint Pro на 45°", desc: "Наклонный коллиматор с большим окном, точка 2,5 MOA (V — переключиться)", foot: [-13, 13], body: [-24, 25], stats: { weight: 110, ergo: -1 }, build: (c) => cantOptic(c, "dpp_off", dppBody) },
+  { id: "acro_off", cat: "offset", side: true, name: "Aimpoint ACRO P-2 на 45°", desc: "Наклонный закрытый коллиматор: излучатель защищён от грязи и воды", foot: [-13, 13], body: [-24, 25], stats: { weight: 120, ergo: -1 }, build: (c) => cantOptic(c, "acro_off", acroBody) },
+  { id: "hs507_off", cat: "offset", side: true, name: "Holosun HS507C на 45°", desc: "Наклонный коллиматор: кольцо 32 MOA + точка, боковой лоток батареи", foot: [-13, 13], body: [-24, 25], stats: { weight: 100, ergo: -1 }, build: (c) => cantOptic(c, "hs507_off", hs507Body) },
   { id: "mbus_rear", cat: "rearsight", name: "Magpul MBUS (целик)", desc: "Складной диоптр, полимер", foot: [-13, 13], body: [-13, 13], stats: { weight: 34 }, build: mbusRear },
   { id: "mbus_front", cat: "frontsight", name: "Magpul MBUS (мушка)", desc: "Складная мушка, полимер", foot: [-13, 13], body: [-13, 13], stats: { weight: 26 }, build: mbusFront }
 ];
@@ -6271,7 +6545,309 @@ var MUZZLES = [
   { id: "linear_ak", cat: "muzzle", name: "Линейный компенсатор (АК)", desc: "Уводит газы вперёд: тише для стрелка, чуть больше отдача", fit: { thread: ["m14x1L", "m24x1.5"] }, stats: { weight: 125, length: 62, flash: -30, loud: -3, "recoilV%": 3 }, build: (c) => linear(c, 8.5) }
 ];
 
+// src/engine/lib/muzzle2.js
+var DEG = Math.PI / 180;
+function flatsX(r, cut, x0, x1, o = {}) {
+  const lim = r - cut, pts = [];
+  for (let i = 0; i < 40; i++) {
+    const a = i / 40 * Math.PI * 2;
+    pts.push([Math.max(-lim, Math.min(lim, Math.cos(a) * r)), Math.sin(a) * r]);
+  }
+  const clean = pts.filter((p, i) => {
+    const q = pts[(i + 1) % pts.length];
+    return Math.abs(p[0] - q[0]) > 1e-3 || Math.abs(p[1] - q[1]) > 1e-3;
+  });
+  return extrudeX(clean, x0, x1, { bevel: o.bevel ?? 0.6 });
+}
+function hexX(af, x0, x1, o = {}) {
+  const R4 = af / 2 / Math.cos(30 * DEG), pts = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (30 + i * 60) * DEG;
+    pts.push([Math.cos(a) * R4, Math.sin(a) * R4, o.rc ?? 2]);
+  }
+  return extrudeX(pts, x0, x1, { bevel: o.bevel ?? 1, crease: 25 });
+}
+function slotOn(x0, x1, w, r, a, o = {}) {
+  const g = extrudeY(slot(x0, x1, 0, w), r - (o.depth ?? 0.8), r + (o.lift ?? 0.12), { bevel: 0.2 });
+  if (o.tilt) {
+    T(g, { p: [-(x0 + x1) / 2, -r, 0] });
+    T(g, { r: [0, 0, o.tilt] });
+    T(g, { p: [(x0 + x1) / 2, r, 0] });
+  }
+  return T(g, { r: [a, 0, 0] });
+}
+function spiralBody(R4, x0, x1, o = {}) {
+  const n = o.n ?? 8, depth = o.depth ?? 1.5, twist = (o.twist ?? 120) * DEG, width = o.width ?? 0.45;
+  const m = n * 12, rings = [], steps = Math.max(12, Math.round((x1 - x0) / (o.dx ?? 3)));
+  const fade = o.fade ?? 10;
+  for (let s = 0; s <= steps; s++) {
+    const x = x0 + s / steps * (x1 - x0);
+    const ramp = Math.min(1, (x - x0) / fade, (x1 - x) / fade);
+    const ph = twist * (x - x0) / (x1 - x0);
+    const pts = [];
+    for (let i = 0; i < m; i++) {
+      const t0 = i / m * Math.PI * 2, t = t0 + ph;
+      const c = Math.cos(n * t0);
+      const g = c > 1 - width * 2 ? Math.min(1, (c - (1 - width * 2)) / (width * 0.9)) : 0;
+      const r = R4 - depth * g * Math.max(0, ramp);
+      pts.push([Math.cos(t) * r, Math.sin(t) * r]);
+    }
+    rings.push({ x, pts });
+  }
+  return loftX(rings, { caps: false, crease: 50, flip: true });
+}
+function faceHoles(k, x, rr, n, r, o = {}) {
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2 + (o.a0 ?? 0) * DEG;
+    k.add("lensBlack", T(cylX(r, x - (o.depth ?? 1.6), x + 0.05, { seg: 10, c: 0.1 }), { p: [0, Math.cos(a) * rr, Math.sin(a) * rr] }));
+  }
+}
+function flow556k(ctx) {
+  const k = ctx.kit(), M = "cast#3b3d40";
+  const R4 = 19.8, L = 169;
+  k.add("steel", latheX([[0, 0], [0, 7.4], [2, 7.4], [2, 0]], { seg: 20 }));
+  k.add(M, hexX(25.4, 0, 12, { rc: 1.2, bevel: 0.8 }));
+  k.add(M, latheX([
+    [11, 0],
+    [11, 14.2],
+    [13, 15.6],
+    [19, R4 - 1.2],
+    [22, R4],
+    [L - 12, R4],
+    [L - 8, R4 - 1.2],
+    [L - 4, R4 - 3.4],
+    [L, R4 - 4.4],
+    [L, R4 - 6],
+    [L - 1.4, R4 - 7],
+    [L - 1.4, 8.2],
+    [L, 7.2],
+    [L, 4.3],
+    [L - 3, 3.8],
+    [L - 3, 0]
+  ], { seg: 56, crease: 30 }));
+  k.add(M, ringGrooves(R4 + 0.05, 24, 34, 5, 0.45, { seg: 56 }));
+  for (let row = 0; row < 6; row++) {
+    const x = 44 + row * 18;
+    for (let i = 0; i < 12; i++) k.add("lensBlack", slotOn(x - 7, x + 7, 3.4, R4, i * 30 + row % 2 * 15));
+  }
+  for (let row = 0; row <= 6; row++) k.add(M, tubeX(R4 + 0.35, R4 - 0.5, 34.4 + row * 18, 36.2 + row * 18, { seg: 56, c: 0.3 }));
+  for (let i = 0; i < 16; i++) k.add("lensBlack", T(box(1.6, 3.6, 2.4, { bevel: 0.5 }), { p: [L - 1.3, 10.6, 0], r: [i * 22.5, 0, 0] }));
+  k.add("lensBlack", cylX(4.3, L - 2.9, L + 0.05, { seg: 20 }));
+  return { root: k.build("flow556k"), muzzle: { x: L, kind: "supp", flash: 0.05, voice: { len: 169, loud: -24 } } };
+}
+function omega36m(ctx) {
+  const k = ctx.kit(), M = "cast";
+  const R4 = 21.85, L = 181;
+  k.add("steel", latheX([[0, 0], [0, 10.6], [1, 11.2], [6, 11.2], [6, 0]], { seg: 28 }));
+  k.add(M, latheX([
+    [4, 0],
+    [4, 15.4],
+    [5.5, 17],
+    [27, 17],
+    [28, 18.4],
+    [30, R4 - 0.8],
+    [32, R4],
+    [L - 26.5, R4],
+    [L - 26, R4 - 0.7],
+    [L - 25.5, R4],
+    [L - 15, R4],
+    [L - 3, R4 - 5.2],
+    [L, R4 - 6.6],
+    [L, R4 - 8.4],
+    [L - 1, R4 - 9.4],
+    [L - 1, 6.6],
+    [L, 5.8],
+    [L, 4.9],
+    [L - 3, 4.4],
+    [L - 3, 0]
+  ], { seg: 60, crease: 30 }));
+  k.add("steelPark", flutesX(17, 7, 26, 32, 1.7, 1));
+  k.add("steelPark", ringGrooves(18.6, 27.6, 30, 1, 0.3, { seg: 48 }));
+  k.add("steel", T(box(9, 2.6, 5, { bevel: 0.7 }), { p: [16, -18.6, 0] }));
+  for (const x of [40, 43.5, L - 40]) k.add("cast#6b6e72", tubeX(R4 + 0.04, R4 - 0.3, x, x + 0.9, { seg: 60, c: 0.1 }));
+  k.add("cast#5d6064", T(extrudeY(slot(58, 96, 0, 4.4), R4 - 0.6, R4 + 0.06, { bevel: 0.1 }), { r: [90, 0, 0] }));
+  for (let i = 0; i < 4; i++) k.add("lensBlack", T(box(3, 3.2, 4, { bevel: 0.4 }), { p: [L - 0.9, R4 - 7.5, 0], r: [45 + i * 90, 0, 0] }));
+  k.add("steelPark", tubeX(9.6, 7.4, L - 1.6, L - 0.6, { seg: 40, c: 0.2 }));
+  k.add("lensBlack", cylX(4.9, L - 2.9, L + 0.05, { seg: 20 }));
+  return { root: k.build("omega36m"), muzzle: { x: L, kind: "supp", flash: 0.03, voice: { len: 181, loud: -30 } } };
+}
+function spiral762(ctx) {
+  const k = ctx.kit(), M = "cast#5a5040";
+  const R4 = 22.25, L = 198, X0 = 42, X1 = L - 30;
+  k.add("steel", latheX([[0, 0], [0, 11.8], [1, 12.4], [8, 12.4], [8, 0]], { seg: 28 }));
+  k.add("steelPark", latheX([[5, 0], [5, 16.4], [6.5, 17.8], [30, 17.8], [31, 16.8], [31, 0]], { seg: 52 }));
+  k.add("steelPark", flutesX(17.6, 9, 28, 36, 1.4, 0.8));
+  k.add("steelPark", ringGrooves(18.3, 9, 28, 6, 0.5, { seg: 52 }));
+  k.add(M, latheX([[30, 0], [30, 18.6], [32, 20], [37, R4 - 0.4], [39, R4], [X0 + 0.5, R4], [X0 + 0.5, 0]], { seg: 60, crease: 30 }));
+  k.add(M, spiralBody(R4, X0, X1, { n: 10, depth: 1.7, twist: 150, width: 0.38 }));
+  k.add(M, latheX([
+    [X1 - 0.5, 0],
+    [X1 - 0.5, R4],
+    [L - 16, R4],
+    [L - 15, R4 - 0.6],
+    [L - 14, R4],
+    [L - 5, R4 - 2.6],
+    [L, R4 - 4.2],
+    [L, R4 - 6.4],
+    [L - 1.2, R4 - 7.2],
+    [L - 1.2, 7.2],
+    [L, 6.4],
+    [L, 5.4],
+    [L - 3, 4.9],
+    [L - 3, 0]
+  ], { seg: 60, crease: 30 }));
+  k.add(M, flutesX(R4 - 0.3, L - 13, L - 6, 12, 2.6, 0.5));
+  faceHoles(k, L - 1.2, 11.2, 8, 1.3, { a0: 22.5 });
+  k.add("lensBlack", cylX(5.4, L - 2.9, L + 0.05, { seg: 20 }));
+  return { root: k.build("spiral762"), muzzle: { x: L, kind: "supp", flash: 0.04, voice: { len: 198, loud: -29 } } };
+}
+function dtk4m(ctx) {
+  const k = ctx.kit(), M = "steelPark";
+  const R4 = 22, L = 192, XC = L - 38, RC = 14;
+  k.add("steel", latheX([[0, 0], [0, 11.4], [1, 12.2], [10, 12.2], [10, 0]], { seg: 28 }));
+  k.add(M, latheX([
+    [6, 0],
+    [6, 15.6],
+    [7.5, 17.2],
+    [34, 17.2],
+    [36, 19],
+    [38, R4 - 0.4],
+    [40, R4],
+    [XC, R4],
+    [L - 6, RC],
+    [L - 6, RC - 0.4],
+    [L, RC],
+    [L, 11],
+    [L - 5.5, 8.4],
+    [L - 5.5, 0]
+  ], { seg: 60, crease: 25 }));
+  k.add("steel", ringGrooves(17.5, 10, 24, 8, 0.45, { seg: 52 }));
+  for (const a of [60, 180, 300]) k.add(M, T(box(8, 2.2, 3, { bevel: 0.6 }), { p: [30, 17.8, 0], r: [a, 0, 0] }));
+  k.add("steel", T(extrudeZ([[0, -2.6, 1], [22, -2.2, 1.2], [25, 0, 1], [22, 2.8, 1.4], [0, 2.8, 1]], 2.4, { bevel: 0.5 }), { p: [12, 0, 18.4] }));
+  k.add("steel", T(cylZ(2.8, 16.6, 19.8, { seg: 14 }), { p: [33, 0, 0] }));
+  for (const x of [52, 96, 140]) k.add(M, tubeX(R4 + 0.6, R4 - 0.2, x, x + 3.2, { seg: 60, c: 0.6 }));
+  k.add("steel", tubeX(R4 + 0.25, R4 - 0.2, 44, 45.6, { seg: 60, c: 0.4 }));
+  const tilt = -Math.atan((R4 - RC) / (L - 6 - XC)) / DEG;
+  for (let i = 0; i < 8; i++) k.add("lensBlack", slotOn(XC + 6, L - 12, 3.2, (R4 + RC) / 2 + 0.1, i * 45 + 22.5, { tilt }));
+  for (let i = 0; i < 6; i++) k.add("lensBlack", T(box(3.6, 3.4, 2.6, { bevel: 0.4 }), { p: [L - 0.8, RC - 1.3, 0], r: [i * 60, 0, 0] }));
+  k.add("lensBlack", cylX(8.4, L - 5.9, L - 5.3, { seg: 28 }));
+  k.add("lensBlack", cylX(5, L - 6, L - 5.2, { seg: 20 }));
+  return { root: k.build("dtk4m"), muzzle: { x: L, kind: "supp", flash: 0.04, voice: { len: 192, loud: -27 } } };
+}
+function wolverine(ctx) {
+  const k = ctx.kit(), M = "cast#4a4c3c", POCKET = "cast#23241d";
+  const AF = 42, L = 186, H0 = 24, H1 = L - 22;
+  k.add("steel", latheX([[0, 0], [0, 11.4], [1, 12.2], [10, 12.2], [10, 0]], { seg: 28 }));
+  k.add(M, latheX([[5, 0], [5, 16.6], [6.5, 18], [H0 + 1, 18], [H0 + 1, 0]], { seg: 52 }));
+  k.add(M, ringGrooves(18.2, 7, 14, 4, 0.45, { seg: 52 }));
+  k.add(M, flatsX(18.3, 1.6, 15, H0 - 1));
+  k.add(M, hexX(AF, H0, H1, { rc: 3, bevel: 1.4 }));
+  const ap = AF / 2;
+  for (let i = 0; i < 6; i++) {
+    const a = 90 - i * 60;
+    k.add(POCKET, slotOn(H0 + 12, H0 + 62, 9, ap, a, { depth: 0.5, lift: 0.06 }));
+    k.add(POCKET, slotOn(H0 + 70, H1 - 12, 9, ap, a, { depth: 0.5, lift: 0.06 }));
+  }
+  k.add(M, latheX([
+    [H1 - 1, 0],
+    [H1 - 1, 19.6],
+    [H1 + 1, 20.4],
+    [L - 8, 20.4],
+    [L - 2, 17.6],
+    [L, 16],
+    [L, 13.6],
+    [L - 1.2, 12.8],
+    [L - 1.2, 6.8],
+    [L, 6],
+    [L, 5.2],
+    [L - 3, 4.7],
+    [L - 3, 0]
+  ], { seg: 56, crease: 30 }));
+  k.add(M, ringGrooves(20.4, H1 + 4, H1 + 12, 3, 0.4, { seg: 56 }));
+  faceHoles(k, L - 1.2, 9.8, 6, 1.5, { a0: 30 });
+  k.add("lensBlack", cylX(5.2, L - 2.9, L + 0.05, { seg: 20 }));
+  return { root: k.build("wolverine"), muzzle: { x: L, kind: "supp", flash: 0.04, voice: { len: 186, loud: -26 } } };
+}
+function tripleTap(ctx) {
+  const k = ctx.kit();
+  const R4 = 11.1, L = 57;
+  k.add("steel", flatsX(R4, 1.8, 0, 12.4, { bevel: 0.6 }));
+  k.add("steel", latheX([[12, 0], [12, R4 - 0.5], [12.5, R4], [L - 1.6, R4], [L, R4 - 1.4], [L, 5.4], [L - 3, 4.8], [L - 3, 0]], { seg: 40, crease: 30 }));
+  k.add("steel", ringGrooves(R4, 13.5, 17.5, 2, 0.35, { seg: 40 }));
+  for (let i = 0; i < 3; i++) for (const a of [-90, 90]) k.add("lensBlack", slotOn(20 + i * 10.5, 28 + i * 11, 4.4 + i * 0.4, R4, a, { depth: 2.4, lift: 0.05 }));
+  for (const x of [25, 33, 41]) k.add("lensBlack", T(cylY(1.7, R4 - 1.6, R4 + 0.2, { seg: 12 }), { p: [x, 0, 0] }));
+  for (let i = 0; i < 3; i++) k.add("lensBlack", T(box(9, 3.4, 3.8, { bevel: 0.6 }), { p: [L - 3.6, R4 - 1.2, 0], r: [60 + i * 120, 0, 0] }));
+  k.add("lensBlack", cylX(4.8, L - 2.9, L + 0.05, { seg: 18 }));
+  return { root: k.build("tripletap"), muzzle: { x: L, kind: "fh", flash: 0.35 } };
+}
+function dtk3(ctx) {
+  const k = ctx.kit(), M = "steelPark";
+  const R4 = 15, L = 88, C0 = 38, C1 = L - 9;
+  k.add(M, flatsX(R4, 2.2, 0, 14, { bevel: 0.8 }));
+  k.add(M, latheX([[13.5, 0], [13.5, R4 - 0.6], [14.5, R4], [C0, R4], [C0, 0]], { seg: 44 }));
+  k.add(M, flutesX(R4 - 0.2, 16, 24, 18, 1.6, 0.6));
+  for (const x of [28, 33.5]) k.add("lensBlack", T(cylY(2.3, R4 - 2, R4 + 0.3, { seg: 14 }), { p: [x, 0, 0] }));
+  k.add("lensBlack", T(box(6, 2, 4, { bevel: 0.4 }), { p: [6, -R4 + 0.7, 0] }));
+  for (let i = 0; i < 4; i++) {
+    const a = 45 + i * 90;
+    k.add(M, T(extrudeZ([[C0 - 1, 0], [C1 + 1, 0], [C1 + 1, 4.2, 0.8], [C0 - 1, 4.2, 0.8]], 7, { bevel: 0.7 }), { p: [0, R4 - 4.2, 0], r: [a, 0, 0] }));
+  }
+  for (const x of [C0 + 9, C0 + 24]) k.add("steel", latheX([[x, 0], [x, 5], [x + 5, R4 - 4.4], [x + 7, R4 - 4.4], [x + 7, 5.4], [x + 5, 5], [x + 5, 0]], { seg: 32 }));
+  k.add("lensBlack", tubeX(5, 4.2, C0, C1, { seg: 16, c: 0.1 }));
+  k.add(M, latheX([[C1, 6.6], [C1, R4 - 0.8], [C1 + 0.8, R4], [L - 1.2, R4], [L, R4 - 1.2], [L, 7.6], [L - 3, 6], [C1, 6], [C1, 6.6]], { seg: 44, crease: 30 }));
+  k.add("lensBlack", cylX(6.05, C1 - 0.2, L + 0.05, { seg: 20, c: 0.1 }));
+  return { root: k.build("dtk3"), muzzle: { x: L, kind: "comp", flash: 0.45 } };
+}
+var MUZZLES2 = [
+  { id: "hux_flow556k", cat: "muzzle", name: "HUXWRX FLOW 556k", desc: "Проточный глушитель из инконеля (3D-печать): меньше обратного газа, решётка окон, прямая резьба", fit: { thread: ["1/2x28"] }, stats: { weight: 414, length: 169, loud: -24, flash: -70, "recoilV%": -9, ergo: -7, adsTime: 22, velocity: 4 }, build: flow556k },
+  { id: "omega36m", cat: "muzzle", name: "SilencerCo Omega 36M", desc: "Титановый мультикалиберный глушитель: крепление ASR, коническая дульная крышка", fit: { thread: ["1/2x28", "5/8x24"] }, stats: { weight: 400, length: 181, loud: -30, flash: -78, "recoilV%": -12, ergo: -8, adsTime: 25, velocity: 5 }, build: omega36m },
+  { id: "spiral762", cat: "muzzle", name: "Спиральный глушитель 7,62", desc: "Корпус с винтовыми канавками (как у OSS): легче и лучше охлаждается, быстросъёмная муфта", fit: { thread: ["5/8x24"] }, stats: { weight: 590, length: 198, loud: -29, flash: -76, "recoilV%": -13, ergo: -10, adsTime: 30, velocity: 6 }, build: spiral762 },
+  { id: "dtk4m", cat: "muzzle", name: "Зенитко ДТК-4М", desc: "Тактический глушитель к АК: стальной корпус, рычаг-фиксатор, пламегасящий конус", fit: { thread: ["m24x1.5", "m14x1L"] }, stats: { weight: 560, length: 192, loud: -27, flash: -85, "recoilV%": -14, ergo: -9, adsTime: 28, velocity: 3 }, build: dtk4m },
+  { id: "hex_wolverine", cat: "muzzle", name: "Hexagon Wolverine", desc: "Глушитель к АК с шестигранным корпусом: не катится по столу, фрезерованные карманы", fit: { thread: ["m24x1.5", "m14x1L"] }, stats: { weight: 520, length: 186, loud: -26, flash: -80, "recoilV%": -12, ergo: -8, adsTime: 24, velocity: 3 }, build: wolverine },
+  { id: "kac_tripletap", cat: "muzzle", name: "KAC Triple Tap", desc: "Пламегаситель-компенсатор: три окна сверху гасят подброс, трёхзубая корона", fit: { thread: ["1/2x28"] }, stats: { weight: 94, length: 57, flash: -40, "recoilV%": -7, "recoilH%": -5, loud: 1 }, build: tripleTap },
+  { id: "dtk3", cat: "muzzle", name: "Зенитко ДТК-3", desc: "Компенсатор к АК с открытой передней клеткой: гасит подброс, громче штатного", fit: { thread: ["m24x1.5", "m14x1L"] }, stats: { weight: 170, length: 88, flash: -20, "recoilV%": -18, "recoilH%": -14, loud: 3 }, build: dtk3 }
+];
+
 // src/engine/lib/tactical.js
+function lampFace(ctx, o) {
+  const { x, r, cy = 0, cz = 0, depth = 14, led = 2.2, tir = false } = o;
+  const at = (g) => g.translate(0, cy, cz);
+  const meshes = [];
+  let refl;
+  if (!tir) {
+    const prof = [];
+    for (let i = 0; i <= 12; i++) {
+      const t = i / 12;
+      prof.push([x - 1.2 - depth * (1 - t), led * 1.25 + (r - 0.4 - led * 1.25) * Math.sqrt(t)]);
+    }
+    refl = lens(ctx, at(latheX(prof.reverse(), { seg: 40, crease: 80 })), "reflector");
+    refl.renderOrder = 0;
+  } else {
+    const prof = [[x - depth, led * 1.6], [x - depth * 0.45, r * 0.62], [x - 1.2, r - 0.3]];
+    refl = lens(ctx, at(latheX(prof.reverse(), { seg: 36, crease: 80 })), "reflector");
+    refl.material.color.set(10134442);
+    refl.material.roughness = 0.25;
+    refl.renderOrder = 0;
+  }
+  refl.material.transparent = false;
+  meshes.push(refl);
+  const x0 = tir ? x - depth : x - 1.2 - depth;
+  const pad = new ctx.THREE.Mesh(at(box(0.8, led * 2.6, led * 2.6, { bevel: 0.2 }).translate(x0 + 0.2, 0, 0)), ctx.mats.get("paintWhite"));
+  meshes.push(pad);
+  const ledM = lens(ctx, at(latheX([[x0 + 0.5, 0], [x0 + 0.5, led], [x0 + 1.1, led * 0.9], [x0 + 1.5, led * 0.5], [x0 + 1.7, 0]], { seg: 20 })), "ledPhos");
+  ledM.renderOrder = 0;
+  ledM.material.transparent = false;
+  meshes.push(ledM);
+  const glass = lens(ctx, at(cylX(r - 0.1, x - 1.1, x - 0.3, { seg: 40, c: 0.2 })), "glass");
+  meshes.push(glass);
+  if (tir) {
+    const cone = lens(ctx, at(latheX([[x - depth + 0.3, 0], [x - depth + 0.3, led * 1.5], [x - depth * 0.45, r * 0.6], [x - 1.3, r - 0.4], [x - 1.3, 0]], { seg: 36 })), "glass");
+    cone.material.opacity = 0.22;
+    meshes.push(cone);
+  }
+  for (const m of meshes) m.userData.noAO = true;
+  return { meshes, lens: ledM, refl, p: [x + 0.2, cy, cz], lensR: r / 1e3 };
+}
 function scout(ctx, o) {
   const k = ctx.kit();
   const r = o.r, L0 = o.tail, L1 = o.head, H = o.headR, cy = r + 4.5;
@@ -6281,16 +6857,151 @@ function scout(ctx, o) {
   k.add("alu", at(ringGrooves(r + 0.2, L0 + 3, L0 + 15, 6, 0.5, { seg: 36 })));
   k.add("alu", at(flutesX(H - 1.6, L1 + 8, L1 + 25, 6, 5, 1.8)));
   k.add("steel", at(tubeX(H + 0.1, H - 3.4, L1 + 28, L1 + 31, { seg: 36 })));
+  k.add("steel", at(ringGrooves(H + 0.1, L1 + 28.4, L1 + 30.6, 2, 0.3, { seg: 36 })));
   k.add("alu", clampBody(-13, 13, 4.8, { w: 24 }));
   k.add("alu", extrudeX([[-7, 3], [7, 3], [7, cy - r + 3], [-7, cy - r + 3]], -12, 12, { bevel: 1 }));
   k.add("steel", T(ctx.C.knob(6.2, 5, 16), { r: [0, -90, 0], p: [0, -2.5, 12.5] }));
   k.add("steel", cylZ(2.4, -14, 12.5, { seg: 12 }), { p: [0, -2.5, 0] });
+  k.add("steel", at(tubeX(r + 0.25, r - 0.5, L0 + 0.5, L0 + 1.5, { seg: 36 })));
   const root = node(o.name, [k.build()]);
-  const le = lens(ctx, cylX(H - 3.3, L1 + 28.6, L1 + 29.4, { seg: 32 }).translate(0, cy, 0), "lampLens");
-  le.renderOrder = 0;
-  le.material.transparent = false;
-  root.add(le);
-  return { root, light: { p: [L1 + 30, cy, 0], lens: le, lumens: o.lm, beam: { lensR: (H - 3.3) / 1e3, ...o.beam } } };
+  const f = lampFace(ctx, { x: L1 + 29.2, r: H - 3.4, cy, depth: 18, led: 2.4 });
+  root.add(...f.meshes);
+  return { root, light: { p: [L1 + 30, cy, 0], lens: f.lens, refl: f.refl, lumens: o.lm, beam: { lensR: f.lensR, ...o.beam } } };
+}
+function tlr1(ctx) {
+  const k = ctx.kit();
+  const cy = 18;
+  k.add("alu", clampBody(-16, 16, 5, { w: 25 }));
+  k.add("steel", T(box(8, 4, 26, { bevel: 0.8 }), { p: [4, -2, 0] }));
+  k.add("steel", T(ctx.C.knob(5.4, 4, 14), { r: [0, -90, 0], p: [4, -2.5, 12.8] }));
+  const sec = rrect(0, cy - 1, 30, 29, 11);
+  k.add("alu", extrudeX(sec, -52, 14, { bevel: 2 }));
+  k.add("alu", extrudeX(rrect(0, 6.5, 22, 5, 1.5), -40, 12, { bevel: 0.8 }));
+  k.add("alu", T(latheX([[12, 0], [12, 14.6], [14, 15.6], [30, 15.6], [31, 16.4], [37, 16.4], [38, 15.2], [38, 0]], { seg: 44 }), { p: [0, cy, 0] }));
+  k.add("alu", T(ringGrooves(15.7, 16, 28, 5, 0.5, { seg: 44 }), { p: [0, cy, 0] }));
+  k.add("steel", T(flutesX(16.3, 31, 37, 30, 1.2, 0.6), { p: [0, cy, 0] }));
+  for (const s of [-1, 1]) {
+    k.add("poly", T(extrudeZ([[0, -6, 2], [12, -4, 3], [14, 6, 3], [0, 7, 2]], 4, { bevel: 1.2 }), { p: [-58, cy - 2, s * 14.5] }));
+    for (let i = 0; i < 4; i++) k.add("poly", T(box(1.2, 10, 1, { bevel: 0.3 }), { p: [-55 + i * 3, cy - 1, s * 16.8] }));
+  }
+  k.add("alu", extrudeX(rrect(0, cy - 2, 26, 22, 6), -60, -50, { bevel: 1.5 }));
+  for (const x of [-44, -8]) for (const s of [-1, 1]) k.add("steel", T(cylZ(1.6, 14.8, 15.6, { seg: 10 }), { p: [x, cy + 7, s > 0 ? 0 : -30.4] }));
+  const root = node("tlr1", [k.build()]);
+  const f = lampFace(ctx, { x: 38, r: 13.6, cy, depth: 15, led: 2.2 });
+  root.add(...f.meshes);
+  return { root, light: { p: f.p, lens: f.lens, refl: f.refl, beam: { lensR: f.lensR, candela: 13e3, hot: 0.085, spill: 0.62, spillK: 0.05, ring: 0.05, color: 15856895 } } };
+}
+function modlite(ctx) {
+  const k = ctx.kit();
+  const cy = 24, r = 12.7;
+  k.add("alu", clampBody(-13, 13, 5, { w: 24 }));
+  k.add("steel", crossBolt(0));
+  k.add("alu", extrudeX([[-8, 3, 1], [8, 3, 1], [8, cy - r + 2, 2], [-8, cy - r + 2, 2]], -12, 12, { bevel: 1 }));
+  k.add("alu", T(tubeX(r + 3.2, r, -14, 14, { seg: 40 }), { p: [0, cy, 0] }));
+  k.add("steel", T(cylY(2.4, cy + r - 1, cy + r + 4.4, { seg: 12 }), { p: [0, 0, 0] }));
+  const at = (g) => T(g, { p: [0, cy, 0] });
+  k.add("alu", at(latheX([[-86, 0], [-86, 9], [-84, 11.5], [-80, 13.2], [-66, 13.2], [-65, r], [6, r], [8, r + 1.2], [14, r + 1.2]], { seg: 40 })));
+  k.add("alu", at(ringGrooves(13.3, -79, -67, 6, 0.5, { seg: 40 })));
+  k.add("rubber", at(latheX([[-90, 0], [-90, 7], [-88.5, 8.8], [-86, 9.4], [-86, 0]], { seg: 28 })));
+  k.add("alu", at(latheX([[14, 0], [14, 13.9], [22, 16.5], [30, 18.4], [50, 19.2], [52, 18.4], [52, 0]], { seg: 48 })));
+  for (let i = 0; i < 6; i++) k.add("alu", at(tubeX(19.6, 17.5, 22 + i * 3.5, 23.6 + i * 3.5, { seg: 48 })));
+  k.add("steel", at(tubeX(19.3, 16.8, 49, 53, { seg: 48 })));
+  const root = node("modlite", [k.build()]);
+  const f = lampFace(ctx, { x: 52.6, r: 16.8, cy, depth: 26, led: 1.8 });
+  root.add(...f.meshes);
+  return { root, light: { p: f.p, lens: f.lens, refl: f.refl, beam: { lensR: f.lensR, candela: 6e4, hot: 0.045, spill: 0.5, spillK: 0.018, ring: 0.07, color: 16774116 } } };
+}
+function rein(ctx) {
+  const k = ctx.kit();
+  const cy = 19, r = 12;
+  k.add("alu", clampBody(-14, 14, 5, { w: 24 }));
+  k.add("steel", crossBolt(-6));
+  k.add("steel", crossBolt(6));
+  k.add("alu", extrudeX([[-9, 3, 1], [9, 3, 1], [9, cy - 6, 3], [-9, cy - 6, 3]], -16, 16, { bevel: 1 }));
+  const at = (g) => T(g, { p: [0, cy, 0] });
+  k.add("alu", at(latheX([[-36, 0], [-36, 8], [-34, 11], [-30, 11.6], [-18, 11.6], [-17, r], [18, r]], { seg: 40 })));
+  k.add("alu", at(ringGrooves(r + 0.2, -12, 16, 7, 0.45, { seg: 40 })));
+  k.add("rubber", at(latheX([[-40, 0], [-40, 6], [-38, 7.6], [-36, 8], [-36, 0]], { seg: 24 })));
+  k.add("alu", at(cylX(15.5, 18, 36, { seg: 6, c: 1.4 })));
+  k.add("steel", at(tubeX(15.3, 13.2, 35, 37, { seg: 40 })));
+  const root = node("rein", [k.build()]);
+  const f = lampFace(ctx, { x: 37.4, r: 13, cy, depth: 12, led: 1.6, tir: true });
+  root.add(...f.meshes);
+  return { root, light: { p: f.p, lens: f.lens, refl: f.refl, beam: { lensR: f.lensR, candela: 16e3, hot: 0.13, spill: 0.72, spillK: 0.12, ring: 0.02, tir: true, color: 16773341 } } };
+}
+function klesch(ctx) {
+  const k = ctx.kit();
+  const cy = 17;
+  k.add("alu", clampBody(-20, 20, 5, { w: 26 }));
+  k.add("steel", crossBolt(-10));
+  k.add("steel", crossBolt(10));
+  k.add("alu", extrudeX(rrect(0, cy, 32, 28, 7), -46, 30, { bevel: 2.2 }));
+  for (const s of [-1, 1]) for (let i = 0; i < 7; i++) k.add("alu", T(box(3, 16, 1.6, { bevel: 0.5 }), { p: [-34 + i * 6, cy, s * 16.4] }));
+  k.add("alu", extrudeX(shape(rrect(0, cy, 32, 28, 7), [rrect(-3, cy, 24, 22, 5)]), 30, 34, { bevel: 0.8 }));
+  for (const [z, y] of [[-12, cy - 10], [12, cy - 10], [-12, cy + 10], [12, cy + 10]]) k.add("steel", T(cylX(1.3, 33.5, 34.5, { seg: 10 }), { p: [0, y, z] }));
+  k.add("lensBlack", extrudeX(rrect(-3, cy, 24, 22, 5), 30.2, 31, { bevel: 0.2 }));
+  k.add("steel", T(tubeX(4.4, 3, 30, 34.4, { seg: 20 }), { p: [0, cy + 6, 11.5] }));
+  k.add("irLens", T(cylX(3, 31.5, 32.5, { seg: 20 }), { p: [0, cy + 6, 11.5] }));
+  k.add("steel", T(cylX(4.2, -52, -46, { seg: 20 }), { p: [0, cy + 4, 0] }));
+  k.add("rubber", T(cylX(5.4, -50, -46, { seg: 20 }), { p: [0, cy - 7, 0] }));
+  const root = node("klesch", [k.build()]);
+  const f = lampFace(ctx, { x: 31, r: 10.5, cy, cz: -3, depth: 13, led: 2 });
+  root.add(...f.meshes);
+  return { root, light: { p: f.p, lens: f.lens, refl: f.refl, beam: { lensR: f.lensR, candela: 9e3, hot: 0.06, spill: 0.46, spillK: 0.03, ring: 0.06, color: 15660031 } } };
+}
+function laserBox(ctx, o) {
+  const k = ctx.kit();
+  const { L0, L1, H, W, mat } = o;
+  k.add("alu", clampBody(-18, 18, 5));
+  k.add("steel", T(ctx.C.knob(6, 5, 18), { r: [0, -90, 0], p: [0, -2.5, 13] }));
+  k.add("steel", cylZ(2.4, -14, 13, { seg: 12 }), { p: [0, -2.5, 0] });
+  const sec = [[-W / 2, 4, 3], [W / 2, 4, 3], [W / 2, H - 4, 6], [W / 2 - 4, H, 5], [-W / 2 + 4, H, 5], [-W / 2, H - 4, 6]];
+  k.add(mat, extrudeX(sec, L0, L1, { bevel: 3, bevelSeg: 3 }));
+  for (const s of [-1, 1]) {
+    k.add(mat, T(box(L1 - L0 - 24, H - 16, 1.2, { bevel: 0.6 }), { p: [(L0 + L1) / 2 - 2, H / 2 + 1, s * (W / 2 + 0.2)] }));
+    for (let i = 0; i < 3; i++) k.add("lensBlack", T(box(L1 - L0 - 40, 0.8, 0.6), { p: [(L0 + L1) / 2 - 2, 10 + i * 5, s * (W / 2 + 0.9)] }));
+  }
+  const vis = [L1 + 0.6, H * 0.7, -W * 0.22];
+  k.add("lensBlack", extrudeX(rrect(0, H * 0.7, W - 10, 12, 3), L1 - 0.8, L1 + 0.6, { bevel: 0.3 }));
+  for (const z of [-W * 0.22, W * 0.12]) k.add("steel", T(tubeX(4.4, 2.8, L1 - 1, L1 + 2.2, { seg: 20 }), { p: [0, H * 0.7, z] }));
+  if (o.illum) {
+    const iy = H * 0.34;
+    k.add(mat, T(tubeX(o.illum + 3, o.illum, L1 - 4, L1 + 9, { seg: 36 }), { p: [0, iy, 0] }));
+    k.add("rubber", T(flutesX(o.illum + 2.8, L1 + 1, L1 + 8, 24, 1.2, 0.8), { p: [0, iy, 0] }));
+    k.add("irLens", T(cylX(o.illum - 0.2, L1 + 6, L1 + 7, { seg: 30 }), { p: [0, iy, 0] }));
+  }
+  const turret = (p, r) => {
+    k.add(mat, T(cylY(5, 0, 2.2, { seg: 24, c: 0.5 }), { p, r }));
+    k.add("steel", T(cylY(3.4, 2.2, 3.4, { seg: 20, c: 0.3 }), { p, r }));
+    k.add("lensBlack", T(box(0.8, 1.2, 5, { bevel: 0.1 }), { p: [p[0], p[1], p[2]], r }).translate(0, 0, 0));
+  };
+  turret([L1 - 16, H, 0], [0, 0, 0]);
+  turret([L1 - 16, H / 2, W / 2], [90, 0, 0]);
+  k.add(mat, T(ctx.C.knob(8.5, 5, 20), { r: [0, 0, 90], p: [L0 + 30, H - 1, 0] }));
+  for (let i = 0; i < 5; i++) {
+    const a = -0.9 + i * 0.45;
+    k.add("paintWhite", T(box(2.4, 0.6, 1.1), { p: [L0 + 30 + Math.cos(a) * 11, H + 0.1, Math.sin(a) * 11], r: [0, -a * 57.3, 0] }));
+  }
+  k.add("paintWhite", T(box(4, 0.8, 1.2), { p: [L0 + 30, H + 4.2, 5] }));
+  for (const z of [-W * 0.25, W * 0.25]) k.add("rubber", T(cylY(4.2, H - 1, H + 2.4, { c: 1, seg: 18 }), { p: [L0 + 12, 0, z] }));
+  k.add("steel", T(cylX(4, L0 - 5, L0, { seg: 20 }), { p: [0, H * 0.5, 0] }));
+  k.add(mat, T(ctx.C.knob(8, 5, 26), { r: [0, 0, 0], p: [0, 0, 0] }).rotateY(-Math.PI / 2).translate(L0 + 14, H * 0.45, W / 2 - 1));
+  const root = node(o.name, [k.build()]);
+  const ll = lens(ctx, cylX(2.7, vis[0] + 0.8, vis[0] + 1.4, { seg: 16 }).translate(0, vis[1], vis[2]), "laserLens");
+  ll.renderOrder = 0;
+  ll.material.transparent = false;
+  ll.material.emissive.set(o.color);
+  root.add(ll);
+  const out = { root, laser: { p: [vis[0] + 2, vis[1], vis[2]], lens: ll, color: o.color } };
+  if (o.light) {
+    const ly = -2 + H * 0.3, lr = 9.5;
+    k.add(mat, T(latheX([[L1 - 12, 0], [L1 - 12, lr + 2], [L1 + 6, lr + 3.4], [L1 + 8, lr + 2.4], [L1 + 8, 0]], { seg: 36 }), { p: [0, ly, W * 0.2] }));
+    root.add(k.build());
+    const f = lampFace(ctx, { x: L1 + 8.2, r: lr, cy: ly, cz: W * 0.2, depth: 8, led: 1.6, tir: true });
+    root.add(...f.meshes);
+    out.light = { p: f.p, lens: f.lens, refl: f.refl, beam: { lensR: f.lensR, ...o.light } };
+  }
+  return out;
 }
 function boxLaser(ctx, o) {
   const k = ctx.kit();
@@ -6409,6 +7120,28 @@ function harris(ctx) {
   }
   return { root: node("harris", [k.build(), ...legs]), bipod: { legs, angle: 90 } };
 }
+function mvg(ctx) {
+  const k = ctx.kit();
+  k.add("poly", clampBody(-22, 22, 5, { w: 26 }));
+  k.add("steel", T(ctx.C.knob(5.5, 4, 14), { r: [0, -90, 0], p: [0, -2.5, 13] }));
+  const pro = [[-26, 3, 2], [24, 3, 2], [18, 62, 8], [10, 70, 6], [-10, 70, 6], [-18, 62, 8]];
+  k.add("polySoft", extrudeZ(pro, 27, { bevel: 7, curve: 8, bevelSeg: 3 }));
+  for (let i = 0; i < 9; i++) {
+    const y = 12 + i * 5.4, t = (y - 3) / 59;
+    k.add("polySoft", T(box(2.2, 1.6, 20, { bevel: 0.6 }), { p: [24 - 6 * t + 0.6, y, 0], r: [0, 0, -6] }));
+    k.add("polySoft", T(box(2.2, 1.6, 20, { bevel: 0.6 }), { p: [-26 + 8 * t - 0.6, y, 0], r: [0, 0, 7] }));
+  }
+  return { root: k.build("mvg") };
+}
+function kag(ctx) {
+  const k = ctx.kit();
+  const pro = [[-40, 0, 2], [34, 0, 2], [36, 6, 3], [30, 26, 7], [22, 30, 5], [16, 22, 6], [-30, 12, 12], [-42, 8, 4]];
+  k.add("poly", extrudeZ(pro, 28, { bevel: 5, curve: 8, bevelSeg: 3 }));
+  k.add("poly", clampBody(-34, 30, 4, { w: 26 }));
+  for (const x of [-18, 12]) k.add("steel", T(cylZ(2.6, 13.2, 14.6, { seg: 12 }), { p: [x, 4, 0] }));
+  for (let i = 0; i < 6; i++) k.add("poly", T(box(1.6, 3, 18, { bevel: 0.5 }), { p: [-8 + i * 4.2, 17 - i * 0.9, 0], r: [0, 0, -14] }));
+  return { root: k.build("kag") };
+}
 var TACTICAL = [
   { id: "m600", cat: "light", name: "SureFire M600 Scout", desc: "Тактический фонарь 1000 лм", foot: [-13, 13], body: [-78, 72], stats: { weight: 175, ergo: -2 }, power: { light: 20, cells: "2 × CR123A", driver: "reg" }, build: (c) => scout(c, { name: "m600", r: 12.7, headR: 15.9, tail: -76, head: 42, lm: 1e3, beam: { candela: 2e4, hot: 0.07, spill: 0.55, spillK: 0.03, ring: 0.06, color: 15922687 } }) },
   { id: "m300", cat: "light", name: "SureFire M300 Mini Scout", desc: "Компактный фонарь 500 лм", foot: [-13, 13], body: [-60, 44], stats: { weight: 120, ergo: -1 }, power: { light: 24, cells: "1 × CR123A", driver: "reg" }, build: (c) => scout(c, { name: "m300", r: 11, headR: 12.6, tail: -58, head: 14, lm: 500, beam: { candela: 7e3, hot: 0.085, spill: 0.6, spillK: 0.045, ring: 0.05, color: 15922687 } }) },
@@ -6419,7 +7152,20 @@ var TACTICAL = [
   { id: "bcm_vg", cat: "foregrip", name: "BCM Gunfighter Mod 3", desc: "Короткая рукоятка-упор", foot: [-16, 16], body: [-16, 16], stats: { weight: 45, "recoilV%": -4, "recoilH%": -6, ergo: 5 }, build: (c) => vgrip(c, { name: "bcm", len: 62, d: 31, flat: 0.85 }) },
   { id: "afg2", cat: "foregrip", name: "Magpul AFG-2", desc: "Наклонная рукоятка, быстрая вскидка", foot: [-64, 34], body: [-66, 34], stats: { weight: 55, "recoilV%": -3, "recoilH%": -5, ergo: 6, adsTime: -8 }, build: afg },
   { id: "handstop", cat: "foregrip", name: "Упор для ладони", desc: "Упор под хват «C-clamp»", foot: [-14, 18], body: [-14, 18], stats: { weight: 25, ergo: 4, "recoilH%": -3 }, build: handstop },
-  { id: "harris", cat: "bipod", name: "Сошки Harris S-BRM", desc: "Раскладные сошки, клавиша B", foot: [-18, 18], body: [-28, 232], stats: { weight: 420, ergo: -8, adsTime: 25, "recoilV%": -4 }, build: harris }
+  { id: "harris", cat: "bipod", name: "Сошки Harris S-BRM", desc: "Раскладные сошки, клавиша B", foot: [-18, 18], body: [-28, 232], stats: { weight: 420, ergo: -8, adsTime: 25, "recoilV%": -4 }, build: harris },
+  // фонари (добавлены): Streamlight, Modlite, Cloud Defensive, Зенитко
+  { id: "tlr1", cat: "light", name: "Streamlight TLR-1 HL", desc: "Фонарь «пистолетного» типа 1000 лм, клавиши сзади с обеих сторон", foot: [-16, 16], body: [-62, 39], stats: { weight: 125, ergo: -2 }, power: { light: 22, cells: "2 × CR123A", driver: "reg" }, build: tlr1 },
+  { id: "modlite", cat: "light", name: "Modlite PLHv2 18650", desc: "Дальнобойный фонарь 1500 лм / 60 000 кд, выносной кронштейн", foot: [-13, 13], body: [-91, 54], stats: { weight: 190, ergo: -3 }, power: { light: 21, cells: "1 × 18650", driver: "step" }, build: modlite },
+  { id: "rein", cat: "light", name: "Cloud Defensive REIN 3.0 Micro", desc: "Компактный фонарь с широким ровным лучом (TIR), 1400 лм", foot: [-16, 16], body: [-41, 38], stats: { weight: 105, ergo: -1 }, power: { light: 25, cells: "1 × 18350", driver: "step" }, build: rein },
+  { id: "klesch", cat: "light", name: "Зенитко «Клещ-2П»", desc: "Тактический фонарь с ИК-светодиодом, выносная кнопка", foot: [-20, 20], body: [-53, 35], stats: { weight: 160, ergo: -2 }, power: { light: 30, cells: "2 × CR123A", driver: "reg" }, build: klesch },
+  // лазерные блоки (добавлены)
+  { id: "dbal_a3", cat: "laser", name: "Steiner DBAL-A3", desc: "ЛЦУ: зелёный видимый + ИК лазер, ИК-осветитель с фокусировкой", foot: [-18, 18], body: [-44, 66], stats: { weight: 230, ergo: -3, "hipSpread%": -18 }, power: { laser: 30, cells: "1 × CR123A" }, build: (c) => laserBox(c, { name: "dbal_a3", L0: -44, L1: 56, H: 36, W: 42, mat: "polyFdeDark", illum: 8, color: 4063066 }) },
+  { id: "perst4", cat: "laser", name: "Зенитко «Перст-4»", desc: "Компактный ЛЦУ: красный видимый + ИК лазеры", foot: [-18, 18], body: [-36, 40], stats: { weight: 135, ergo: -2, "hipSpread%": -14 }, power: { laser: 28, cells: "1 × CR123A" }, build: (c) => laserBox(c, { name: "perst4", L0: -36, L1: 38, H: 30, W: 34, mat: "alu", illum: 0, color: 16722458 }) },
+  { id: "peq16", cat: "combo", name: "Insight AN/PEQ-16A", desc: "Комбо-блок: белый фонарь 150 лм + красный и ИК лазеры (C / Z)", foot: [-18, 18], body: [-48, 66], stats: { weight: 280, ergo: -3, "hipSpread%": -14 }, power: { light: 24, laser: 30, cells: "2 × CR123A", driver: "reg" }, build: (c) => laserBox(c, { name: "peq16", L0: -48, L1: 56, H: 40, W: 46, mat: "polyTan", illum: 0, color: 16722458, light: { candela: 3e3, hot: 0.12, spill: 0.5, spillK: 0.08, ring: 0.02, tir: true, color: 16185087 } }) },
+  // рукоятки (добавлены)
+  { id: "mvg", cat: "foregrip", name: "Magpul MVG", desc: "Широкая вертикальная рукоятка с наклоном, контроль отдачи", foot: [-22, 22], body: [-27, 25], stats: { weight: 60, "recoilV%": -5, "recoilH%": -9, ergo: 4, adsTime: 4 }, build: mvg },
+  { id: "rk6", cat: "foregrip", name: "Зенитко РК-6", desc: "Прямая рукоятка с выраженным рифлением", foot: [-18, 18], body: [-18, 18], stats: { weight: 85, "recoilV%": -7, "recoilH%": -9, ergo: 2, adsTime: 7 }, build: (c) => vgrip(c, { name: "rk6", len: 108, d: 34, ribs: true, flat: 0.86, cap: true }) },
+  { id: "kag", cat: "foregrip", name: "BCM KAG", desc: "Низкая наклонная рукоятка-упор, быстрая вскидка", foot: [-34, 30], body: [-42, 36], stats: { weight: 40, "recoilV%": -2, "recoilH%": -5, ergo: 6, adsTime: -8 }, build: kag }
 ];
 
 // src/engine/lib/grips.js
@@ -6473,7 +7219,7 @@ var GRIPS = [
 ];
 
 // src/engine/lib/index.js
-var LIB = [...OPTICS, ...MUZZLES, ...TACTICAL, ...GRIPS];
+var LIB = [...OPTICS, ...MUZZLES, ...MUZZLES2, ...TACTICAL, ...GRIPS];
 
 // src/weapons/ak_common.js
 var AK = {
@@ -6496,25 +7242,54 @@ var AK = {
 function receiver(ctx, k, o) {
   const M = o.steel;
   const { FRONT: F, REAR: R4, WALL: W, BOTTOM: B } = AK;
-  const right = [[F, B, 1], [F, W], [-12, W], [-12, -1, 1], [-88, -1, 1], [-88, 7], [-206, 7], [-206, W], [R4, W], [R4, -15, 2], [R4 + 9, B, 3]];
-  const left = [[F, B, 1], [F, W], [R4, W], [R4, -15, 2], [R4 + 9, B, 3]];
-  k.add(M, extrudeZ(right, 1.4, { bevel: 0.35, z: 14.3 }));
-  k.add(M, extrudeZ(left, 1.4, { bevel: 0.35, z: -14.3 }));
-  const floor = shape(rrect((F + R4) / 2, 0, F - R4, 30, 1), [rrect(-37, 0, 72, 26, 2)]);
-  k.add(M, extrudeY(floor, B - 1.4, B, { bevel: 0.3 }));
+  const YB = B + 2, BR = 3.4;
+  const MW0 = -73, MW1 = -1;
+  const dimple = slot(-54, -20, -11, 11, 8);
+  const holes = o.dimples ? [dimple] : [];
+  const low = [[R4 + 9, YB, 3], [MW0, YB, 1], [MW0, B - 1.4, 1], [MW1, B - 1.4, 1], [MW1, YB, 1]];
+  const right = [[F, YB, 1], [F, W], [-12, W], [-12, -1, 1], [-88, -1, 1], [-88, 7], [-206, 7], [-206, W], [R4, W], [R4, -15, 2], ...low];
+  const left = [[F, YB, 1], [F, W], [R4, W], [R4, -15, 2], ...low];
+  k.add(M, extrudeZ(shape(right, holes), 1.4, { bevel: 0.35, z: 14.3 }));
+  k.add(M, extrudeZ(shape(left, holes), 1.4, { bevel: 0.35, z: -14.3 }));
+  if (o.dimples) for (const s of [-1, 1]) k.add(M, extrudeZ(shape(dimple), 1.2, { bevel: 0.45, z: s * 13.9 }));
+  const cz = 15 - BR;
+  for (const [x0, x1] of [[R4 + 6, MW0], [MW1, F]]) {
+    const slot2 = x0 < -100 ? [rrect(-114, 0, 18, 7, 2)] : [];
+    k.add(M, extrudeY(shape(rrect((x0 + x1) / 2, 0, x1 - x0, cz * 2, 0.6), slot2), B - 1.4, B, { bevel: 0.3 }));
+    for (const s of [-1, 1]) {
+      const bend = [];
+      for (let i = 0; i <= 8; i++) {
+        const a = -(i / 8) * Math.PI / 2;
+        bend.push([s * (cz + Math.cos(a) * BR), YB + Math.sin(a) * BR]);
+      }
+      for (let i = 8; i >= 0; i--) {
+        const a = -(i / 8) * Math.PI / 2;
+        bend.push([s * (cz + Math.cos(a) * (BR - 1.4)), YB + Math.sin(a) * (BR - 1.4)]);
+      }
+      k.add(M, extrudeX(bend, Math.max(x0, R4 + 9), x1, { bevel: 0.3 }));
+    }
+  }
   k.add("steel", extrudeX(rrect(0, (B + W) / 2 - 2, 26.6, W - B - 4, 1), 8, F, { bevel: 0.6 }));
   k.add("steel", extrudeX(rrect(0, (B + W) / 2 - 2, 26.6, W - B - 6, 1), R4, R4 + 14, { bevel: 0.6 }));
   k.add("lensBlack", extrudeX(rrect(0, -8, 26, 8, 0), -205, 6, { bevel: 0 }));
   for (const s of [-1, 1]) k.add(M, extrudeX(rrect(s * 13.6, W - 0.6, 3, 1.4, 0.4), R4, F, { bevel: 0.2 }));
-  const rivets = [[4, -5], [14, -15], [2, -17], [16, -4], [-214, -3], [-214, -14], [-201, -9], [-58, -19], [-150, -18]];
-  for (const s of [-1, 1]) for (const [x, y] of rivets) k.add(M, T(latheX([[0, 0], [0, 2.3], [0.7, 1.9], [1.1, 0]], { seg: 12 }), { r: [0, s > 0 ? -90 : 90, 0], p: [x, y, s * 15] }));
-  for (const s of [-1, 1]) for (const [x, y] of [[-118, -7], [-143, -7]]) {
-    k.add("steelWorn", T(cylZ(2.6, 0, 1.2, { seg: 14 }), { p: [x, y, s > 0 ? 15 : -16.2] }));
+  const head = () => latheX([[0, 0], [0, 2.4], [0.35, 2.3], [0.7, 2], [1, 1.4], [1.15, 0.7], [1.2, 0]], { seg: 16, crease: 70 });
+  const rivets = [[4, -5], [16, -4], [3, -17], [15, -16], [-81, -13], [-90, -13], [-77, -19.5], [-150, -18], [-214, -3], [-214, -14], [-201, -9]];
+  for (const s of [-1, 1]) for (const [x, y] of rivets) k.add(M, T(head(), { r: [0, s > 0 ? -90 : 90, 0], p: [x, y, s * 15] }));
+  k.add("steelWorn", T(cylZ(2.5, -15.35, -14.6, { c: 0.25, seg: 16 }), { p: [9.5, -10.5, 0] }));
+  for (const s of [-1, 1]) for (const [x, y] of [[-92, -17], [-112, -18]]) {
+    k.add("steelWorn", T(latheX([[0, 0], [0, 2.7], [0.3, 2.8], [0.9, 2.8], [1.2, 2.4], [1.2, 0]], { seg: 16 }), { r: [0, s > 0 ? -90 : 90, 0], p: [x, y, s * 15] }));
   }
-  k.add("spring", wire([[-118, -7, -16.3], [-128, -9, -16.4], [-143, -7, -16.3], [-160, -10, -16.2], [-170, -6, -16.2], [-168, -1, -16.2]], 0.8, { n: 60, seg: 6 }));
-  if (o.dimples) for (const s of [-1, 1]) k.add(M, T(tubeX(6.5, 4.8, 0, 0.5, { seg: 24, c: 0.15 }), { r: [0, s > 0 ? -90 : 90, 0], p: [-37, -11, s * 15] }));
+  k.add("steelWorn", T(latheX([[0, 0], [0, 4.2], [0.4, 4.4], [1.1, 4.4], [1.5, 3.6], [1.5, 1.4], [2.2, 1.2], [2.2, 0]], { seg: 20 }), { r: [0, 90, 0], p: [-178, 2, -15] }));
+  k.add("spring", wire([[-92, -17, -16.3], [-101, -20, -16.5], [-112, -18, -16.3], [-132, -17, -16.2], [-158, -11, -16.2], [-174, -2, -16.2], [-178, 3.6, -16.4]], 0.8, { n: 70, seg: 6 }));
+  for (const a of [0, -6.5, -13]) {
+    const r = a * Math.PI / 180, lx = 123, ly = 0;
+    const x = -178 + lx * Math.cos(r) - ly * Math.sin(r), y = 2 + lx * Math.sin(r) + ly * Math.cos(r);
+    k.add(M, T(tubeX(1.7, 0.9, 0, 0.35, { seg: 14, c: 0.12 }), { r: [0, -90, 0], p: [x, y, 15] }));
+  }
   k.add(M, T(extrudeX(shape([[-5, 0], [5, 0], [7, 3.2], [-7, 3.2]]), -150, -38, { bevel: 0.4 }), { r: [-90, 0, 0], p: [0, -2, -15.5] }));
-  for (const x of [-140, -48]) k.add(M, T(cylZ(2.2, -19.4, -18.3, { seg: 12 }), { p: [x, -2, 0] }));
+  k.add(M, T(extrudeX(shape([[-7.4, 0], [7.4, 0], [7.4, 0.8], [-7.4, 0.8]]), -152, -36, { bevel: 0.3 }), { r: [-90, 0, 0], p: [0, -2, -15] }));
+  for (const x of [-140, -94, -48]) k.add(M, T(latheX([[0, 0], [0, 2.3], [0.4, 2.1], [0.8, 1.2], [0.9, 0]], { seg: 14 }), { r: [0, 90, 0], p: [x, -2, -18.7] }));
 }
 function coverStd(ctx, o = {}) {
   const k = ctx.kit();
@@ -6535,12 +7310,14 @@ function coverStd(ctx, o = {}) {
   const sec = [...outer, ...inner.map((p) => [p[0], p[1]])];
   k.add(M, extrudeX(sec, AK.REAR + 1, AK.FRONT + 4, { bevel: 0.3 }));
   const ribs = o.ribs || [-196, -170, -144, -118, -92, -66, -40];
-  const rib = arc(16.9, 14, 28, 12.5);
-  const ribIn = arc(16.3, 14, 27.4, 11.9).reverse();
-  for (const x of ribs) k.add(M, extrudeX([...rib, ...ribIn], x - 3, x + 3, { bevel: 0.6 }));
+  const bump = [[-4, 0], [-2.6, 0.3], [-1, 0.6], [1, 0.6], [2.6, 0.3], [4, 0]];
+  for (const x of ribs) k.add(M, loftX(bump.map(([dx, d]) => ({ x: x + dx, pts: arc(16.4 + d, 13.2, 27.5 + d, 12 + d, 18) })), { crease: 70, flip: true }));
+  for (const s of [-1, 1]) k.add(M, extrudeX(rrect(s * 15.2, 12, 2.4, 1.2, 0.4), AK.REAR + 2, AK.FRONT + 3, { bevel: 0.3 }));
   k.add(M, extrudeX(arc(16.4, 11.4, 27.5, 12), AK.REAR - 1, AK.REAR + 2, { bevel: 0.5 }));
   k.add("steelWorn", T(cylX(4.6, AK.REAR - 6, AK.REAR - 0.5, { c: 0.8, seg: 18 }), { p: [0, 17, 0] }));
   k.add("steelWorn", T(box(3, 3, 12), { p: [AK.REAR - 4, 13.5, 0] }));
+  k.add("lensBlack", extrudeY(rrect(AK.REAR + 12, 0, 11, 7, 1.5), 26.9, 27.62, { bevel: 0.1 }));
+  k.add("steelWorn", extrudeY(rrect(AK.REAR + 12.5, 0, 8.4, 5, 1), 24, 28.3, { bevel: 0.5 }));
   return { root: k.build("cover") };
 }
 function carrier(ctx, o) {
@@ -6559,50 +7336,83 @@ function carrier(ctx, o) {
 }
 function barrelAndGas(ctx, k, o) {
   const M = o.steel;
-  const { MUZZLE } = AK;
-  k.add(M, latheX([[AK.FRONT - 6, 0], [AK.FRONT - 6, 12.5], [96, 12.5], [98, 11], [220, 10.2], [296, 9.4], [300, 9], [368, 8.4], [404, 8.2], [405, 7], [MUZZLE, 7], [MUZZLE, 3], [MUZZLE - 6, 3], [MUZZLE - 6, 0]], { seg: 32 }));
-  k.add(M, extrudeZ([[AK.FRONT - 2, 6], [94, 6], [94, 27, 2], [86, 34, 3], [34, 37, 3], [AK.FRONT - 2, 33, 2]], 26, { bevel: 1.4 }));
+  const { MUZZLE, FRONT_X: FX2, SIGHT_Y: SY } = AK;
+  k.add(M, latheX([[AK.FRONT - 6, 0], [AK.FRONT - 6, 12.5], [96, 12.5], [97, 12], [98, 11], [220, 10.2], [286, 9.6], [287, 9.4], [296, 9.4], [300, 9], [330, 8.8], [331.5, 8.5], [362, 8.4], [404, 8.2], [405, 7.2], [405.5, 6.6], [405.5, 0]], { seg: 32 }));
+  k.add(M, latheX([[405.5, 3], [405.5, 7], [MUZZLE - 0.8, 7], [MUZZLE, 6.2], [MUZZLE, 3.6], [MUZZLE - 0.6, 3], [405.5, 3]], { seg: 28 }));
+  k.add(M, extrudeZ([[AK.FRONT - 2, 6], [94, 6], [94, 27, 2], [89, 31, 2], [36, 32.4, 2], [AK.FRONT - 2, 31, 2]], 26, { bevel: 1.4 }));
   k.add(M, extrudeX(shape(circle(0, 0, 15, 24).map((p) => [p[0], p[1], 0])), AK.FRONT - 2, 94, { bevel: 1 }));
+  const cam = [[34, 30], [92, 30]];
+  for (let i = 6; i >= 0; i--) {
+    const y = 35.4 - i * 0.38;
+    cam.push([44 + 8 * i, y], [36 + 8 * i, y]);
+  }
+  for (const s of [-1, 1]) k.add(M, extrudeZ(cam, 4.2, { bevel: 0.4, z: s * 10.9 }));
+  k.add("steelWorn", T(cylZ(1.8, -13.3, 13.3, { c: 0.3, seg: 12 }), { p: [89, 33.2, 0] }));
+  for (const x of [44, 80]) k.add("steelWorn", T(cylZ(1.7, -14.1, 14.1, { c: 0.3, seg: 12 }), { p: [x, -6.5, 0] }));
   const leaf = ctx.kit();
-  const SY = AK.SIGHT_Y;
   leaf.add(M, extrudeZ([[AK.REAR_X, 36.4], [88, 33.6], [88, 36.2], [36, 39.4, 2], [AK.REAR_X, 39.8]], 17, { bevel: 0.5 }));
   const notch = [[-8.5, 35.2, 1], [8.5, 35.2, 1], [8.5, SY, 0.8], [1.5, SY, 0.2], [1.2, SY - 2.4, 0.5], [-1.2, SY - 2.4, 0.5], [-1.5, SY, 0.2], [-8.5, SY, 0.8]];
   leaf.add(M, extrudeX(notch, AK.REAR_X, AK.REAR_X + 3.4, { bevel: 0.3 }));
   leaf.add("steelWorn", extrudeZ([[58, 35.6], [70, 34.9], [70, 41.5, 1], [58, 42.2, 1]], 20, { bevel: 0.8 }));
-  leaf.add("steelWorn", T(cylZ(2.6, 10, 13, { seg: 14 }), { p: [64, 38.6, 0] }));
+  for (let i = 0; i < 4; i++) leaf.add("steelWorn", T(box(0.8, 5, 20.6, { bevel: 0.25 }), { p: [59.6 + i * 3, 38.8 - i * 0.18, 0] }));
+  for (const s of [-1, 1]) {
+    leaf.add("steelWorn", T(latheX([[0, 0], [0, 2.4], [0.8, 2.4], [1.6, 1.8], [1.8, 0]], { seg: 14 }), { r: [0, s > 0 ? -90 : 90, 0], p: [64, 38.4, s * 10] }));
+  }
   for (let i = 0; i < 6; i++) leaf.add("paintWhite", T(box(0.6, 0.2, 3), { p: [40 + i * 7.5, 39.1 - i * 0.4, 5] }));
   const leafNode = leaf.build("rearLeaf");
   k.add(M, extrudeZ([[82, 16, 1], [90, 16, 1], [100, 30, 2], [95, 33, 2]], 3, { bevel: 0.6, z: 14.4 }));
-  k.add(M, T(cylZ(3.2, 13, 16.5, { seg: 16 }), { p: [86, 18, 0] }));
+  k.add(M, T(latheX([[0, 0], [0, 3.4], [2.4, 3.4], [3.4, 2.6], [3.6, 0]], { seg: 16 }), { r: [0, -90, 0], p: [86, 18, 13] }));
   k.add(M, T(cylX(AK.GAS_R, 92, 300, { c: 0.8, seg: 24 }), { p: [0, AK.GAS_Y, 0] }));
+  k.add(M, T(cylX(AK.GAS_R + 0.8, 92, 100, { c: 0.6, seg: 24 }), { p: [0, AK.GAS_Y, 0] }));
+  for (const x of [262, 271, 280]) for (const s of [-1, 1]) {
+    k.add("lensBlack", T(cylZ(1.6, 0, 0.6, { seg: 12, c: 0.1 }), { p: [x, AK.GAS_Y, s > 0 ? AK.GAS_R - 0.35 : -AK.GAS_R - 0.25] }));
+  }
   const gb = o.gas45 ? [[292, -9, 2], [322, -9, 2], [326, 2, 2], [313, 32, 4], [292, 32, 3]] : [[292, -9, 2], [328, -9, 2], [328, 10, 2], [324, 33, 4], [296, 33, 3], [292, 26]];
   k.add(M, extrudeZ(gb, 22, { bevel: 1.6 }));
   k.add(M, T(cylX(11.5, 290, 300, { c: 1, seg: 24 }), { p: [0, AK.GAS_Y, 0] }));
-  k.add(M, wire([[300, 4, -11], [300, 4, -18], [314, 4, -20], [320, 4, -11]], 1.8, { n: 30 }));
+  k.add("steelWorn", T(cylZ(1.9, -11.2, 11.2, { c: 0.3, seg: 12 }), { p: [310, -3, 0] }));
+  k.add(M, extrudeX(shape(rrect(0, -14, 10, 12, 2.4), [circle(0, -15, 3.3, 16)]), 298, 316, { bevel: 0.9 }));
+  k.add(M, T(extrudeZ(rrect(310, 4, 16, 8, 2), 2, { bevel: 0.5 }), { p: [0, 0, -11.6] }));
+  k.add(M, wire([[302, 4, -12], [302, 4, -18], [318, 4, -20], [318, 4, -12]], 1.8, { n: 30 }));
   k.add(M, extrudeZ([[364, -11, 2], [404, -11, 2], [404, 10, 2], [398, 18, 3], [370, 18, 3], [364, 10, 2]], 20, { bevel: 1.4 }));
-  for (const s of [-1, 1]) k.add(M, extrudeZ([[372, 12], [396, 12], [394, 40, 3], [386, AK.SIGHT_Y + 8, 4], [379, AK.SIGHT_Y + 8, 3], [374, 38, 2]], 2.8, { bevel: 0.6, z: s * 7.4 }));
-  k.add("steelWorn", cylY(1.9, 16, AK.SIGHT_Y - 1.2, { seg: 12 }), { p: [AK.FRONT_X, 0, 0] });
-  k.add("steelWorn", extrudeZ([[AK.FRONT_X - 1.2, AK.SIGHT_Y - 2], [AK.FRONT_X + 1.2, AK.SIGHT_Y - 2], [AK.FRONT_X + 0.9, AK.SIGHT_Y, 0.3], [AK.FRONT_X - 0.9, AK.SIGHT_Y, 0.3]], 2.2, { bevel: 0.2 }));
-  if (o.bayonet) k.add(M, extrudeZ([[366, -10], [398, -10], [398, -21, 2], [372, -21, 2]], 11, { bevel: 1 }));
+  for (const s of [-1, 1]) k.add(M, extrudeZ([[372, 12], [396, 12], [394, 40, 3], [386, SY + 8, 4], [379, SY + 8, 3], [374, 38, 2]], 2.8, { bevel: 0.6, z: s * 7.4 }));
+  k.add(M, extrudeZ(rrect(FX2, 19.4, 16, 3.4, 1), 11.4, { bevel: 0.6 }));
+  k.add("steelWorn", T(cylY(4.3, 20.8, 26.6, { c: 0.5, seg: 20 }), { p: [FX2, 0, 0] }));
+  for (let i = 0; i < 4; i++) k.add("steel", T(box(1.2, 2.2, 1.2, { bevel: 0.2 }), { p: [FX2 + 4 * Math.cos(i * Math.PI / 2 + 0.4), 25.6, 4 * Math.sin(i * Math.PI / 2 + 0.4)] }));
+  k.add("steelWorn", cylY(1.9, 26, SY - 1.2, { seg: 12 }), { p: [FX2, 0, 0] });
+  k.add("steelWorn", extrudeZ([[FX2 - 1.2, SY - 2], [FX2 + 1.2, SY - 2], [FX2 + 0.9, SY, 0.3], [FX2 - 0.9, SY, 0.3]], 2.2, { bevel: 0.2 }));
+  for (const x of [369, 399]) k.add("steelWorn", T(cylZ(1.8, -10.2, 10.2, { c: 0.3, seg: 12 }), { p: [x, 2, 0] }));
+  k.add("steelWorn", T(cylX(1.5, 403, 406.2, { c: 0.4, seg: 10 }), { p: [0, -6.5, 5.5] }));
+  if (o.bayonet) {
+    k.add(M, extrudeZ([[366, -10], [400, -10], [400, -16, 1.5], [396, -21, 2], [374, -21, 2], [368, -16, 3]], 11, { bevel: 1 }));
+    for (const s of [-1, 1]) k.add("lensBlack", T(box(3, 5, 0.6, { bevel: 0.2 }), { p: [390, -16.5, s * 5.35] }));
+  }
   k.add("steelWorn", T(cylX(3, 214, 402, { c: 0.6, seg: 12 }), { p: [0, -15, 0] }));
-  k.add("steelWorn", T(latheX([[402, 0], [402, 4.2], [408, 4.2], [410, 2.4], [410, 0]], { seg: 14 }), { p: [0, -15, 0] }));
+  k.add("steelWorn", T(latheX([[401, 0], [401, 3.6], [402, 4.2], [408.6, 4.2], [410, 2.8], [410, 0]], { seg: 16 }), { p: [0, -15, 0] }));
+  k.add("lensBlack", T(cylZ(1.3, -4.3, 4.3, { seg: 10 }), { p: [405.6, -15, 0] }));
   return leafNode;
 }
 function triggerGroup(ctx, k, nodes, o) {
   const M = o.steel;
-  const tg = shape(
-    [[-78, -24], [-152, -24], [-152, -30, 3], [-140, -44, 6], [-94, -46, 6], [-80, -36, 3]],
-    [[[-86, -26.5], [-146, -26.5], [-137, -40, 5], [-96, -42, 5], [-86, -33, 3]]]
-  );
+  const tgHole = [[-86, -26.5], [-146, -26.5], [-137, -40, 5], [-96, -42, 5], [-86, -33, 3]];
+  const tg = shape([[-78, -24], [-152, -24], [-152, -30, 3], [-140, -44, 6], [-94, -46, 6], [-80, -36, 3]], [tgHole]);
   k.add(M, extrudeZ(tg, 10, { bevel: 0.8 }));
-  k.add(M, extrudeZ([[-74, -24], [-80, -24], [-84, -40, 2], [-80, -43, 2], [-76, -38]], 12, { bevel: 0.8 }));
+  const rib = shape([[-79.4, -25], [-150.8, -25], [-150.8, -30.4, 3], [-139.6, -44.9, 6], [-94.1, -46.9, 6], [-79.2, -36.4, 3]], [tgHole]);
+  k.add(M, extrudeZ(rib, 3.6, { bevel: 0.9 }));
+  k.add(M, extrudeZ([[-74.8, -25], [-81.5, -25], [-82.5, -31, 1], [-86.5, -40, 2], [-85.4, -44.6, 2.5], [-80.4, -43.8, 2], [-78.6, -38, 2], [-75.6, -31, 2]], 11, { bevel: 1 }));
+  for (let i = 0; i < 4; i++) k.add(M, T(box(1.2, 0.8, 9, { bevel: 0.3 }), { p: [-86.5 + i * 0.12, -37.8 - i * 1.6, 0] }));
+  k.add("steelWorn", T(cylZ(1.8, -6.4, 6.4, { c: 0.3, seg: 12 }), { p: [-78, -28.4, 0] }));
   const t = ctx.kit();
-  t.add(M, extrudeZ([[-2, 3], [3, 3], [3, -6, 2], [0, -17, 4], [-5, -23, 2], [-7, -21], [-3, -8, 3]], 6, { bevel: 0.9 }));
+  t.add(M, extrudeZ([[-2, 3], [3, 3], [3, -6, 2], [0.4, -15, 4], [-3.4, -21.2, 2], [-5.4, -23, 1.2], [-7.2, -21.4, 1], [-5.6, -17, 3], [-3, -8, 3]], 6, { bevel: 1.1 }));
   nodes.trigger = node("trigger", [t.build()], { p: [-112, -18, 0] });
   const s = ctx.kit();
-  s.add(M, extrudeZ([[-4, -4, 2], [112, 1, 2], [118, 4, 2], [118, 11, 2], [108, 12, 2], [4, 6, 3], [-4, 4, 2]], 1.6, { bevel: 0.4, z: 16.4 }));
-  s.add(M, extrudeZ([[108, 4], [118, 4], [120, -4, 2], [110, -4, 2]], 3, { bevel: 0.8, z: 17 }));
-  s.add(M, cylZ(5.5, 15, 17.5, { seg: 20 }));
+  const lever = [[-6, -3.6, 4], [40, -2.2, 10], [104, 0.4, 3], [116, 1.6, 2], [119.4, 5, 1.4], [119.4, 11.2, 1.4], [108, 12.6, 2], [60, 10.6, 20], [8, 7.2, 5], [-6, 5.6, 5]];
+  s.add(M, extrudeZ(lever, 1.6, { bevel: 0.5, z: 16.1 }));
+  s.add(M, extrudeZ([[10, 0.6, 1], [96, 3.2, 1], [96, 5.4, 1], [10, 3.8, 1]], 0.8, { bevel: 0.35, z: 17.1 }));
+  s.add(M, extrudeY(shape([[104, 16.4, 0.5], [119.4, 16.4, 0.5], [119.4, 21.4, 2.4], [104, 21.4, 2.4]]), -0.4, 1.2, { bevel: 0.45 }));
+  s.add(M, T(cylX(1.3, 104.3, 119.1, { c: 0.4, seg: 10 }), { p: [0, 0.6, 16.9] }));
+  for (let i = 0; i < 4; i++) s.add(M, T(box(1, 0.7, 4, { bevel: 0.2 }), { p: [106.8 + i * 3.6, 1.3, 19.2] }));
+  s.add(M, T(latheX([[15.1, 0], [15.1, 6.2], [15.6, 6.6], [17.4, 6.6], [18, 5.8], [18, 2.6], [18.6, 2.2], [18.6, 0]], { seg: 24 }), { r: [0, -90, 0] }));
   nodes.selector = node("selector", [s.build()], { p: [-178, 2, 0] });
   return [nodes.trigger, nodes.selector];
 }
@@ -6626,7 +7436,7 @@ function akBase(ctx, o) {
   return {
     root,
     nodes,
-    anim: { carrierTravel: 118, selector: { safe: 0, auto: -11, semi: -22 } },
+    anim: { carrierTravel: 118, selector: { safe: 0, auto: -6.5, semi: -13 } },
     eject: { p: [-48, 6, 16], dir: [0.35, 0.45, 1] },
     muzzle: [AK.MUZZLE, 0, 0],
     irons: { rear: [AK.REAR_X + 2, AK.SIGHT_Y, 0], front: [AK.FRONT_X, AK.SIGHT_Y, 0] },
@@ -6661,27 +7471,68 @@ function upperSec(r, y0, n = 14) {
   pts.push([-r, y0], [r, y0]);
   return pts;
 }
+function smoothProf(key, n = 4) {
+  const out = [];
+  for (let i = 0; i < key.length - 1; i++) {
+    const a = key[i], b = key[i + 1];
+    for (let j = 0; j < n; j++) {
+      const t = j / n, e = (1 - Math.cos(Math.PI * t)) / 2;
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * e, a[2] + (b[2] - a[2]) * e]);
+    }
+  }
+  out.push(key[key.length - 1]);
+  return out;
+}
+function uPoint(hw, yb, yt, s, q) {
+  const r = Math.min(hw, (yt - yb) * 0.6);
+  if (q.y != null && q.y >= yb + r) return [s * hw, q.y, s, 0];
+  const a = (q.a ?? 0) * Math.PI / 180;
+  const nz = Math.cos(a) / hw, ny = -Math.sin(a) / r, l = Math.hypot(nz, ny);
+  return [s * Math.cos(a) * hw, yb + r - Math.sin(a) * r, s * nz / l, ny / l];
+}
+function uRib(prof, yt, s, q, w = 1.8, h = 1.2, n = 10) {
+  const xs = prof[0][0], xe = prof[prof.length - 1][0];
+  const rings = prof.map(([x, hw, yb]) => {
+    const [z, y, nz, ny] = uPoint(hw, yb, yt, s, q);
+    const f = Math.max(0.04, Math.min(1, (x - xs) / 5, (xe - x) / 5));
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const t = i / n * Math.PI * 2, c = Math.cos(t), sn = Math.sin(t);
+      const dn = (c * h * 0.5 + h * 0.2) * f - h * 0.35 * (1 - f), dt = sn * w * 0.5 * Math.sqrt(f);
+      pts.push([z + nz * dn - ny * dt, y + ny * dn + nz * dt]);
+    }
+    return { x, pts };
+  });
+  return loftX(rings, { crease: 60, flip: true });
+}
 function lowerStd(ctx, k, mat, o = {}) {
-  const x0 = AK.FRONT + 2, x1 = 212;
-  const rings = [];
-  const prof = o.paddle ? [[x0, 22, -22], [x0 + 20, 23.5, -23], [x0 + 55, 21, -22], [x0 + 80, 18.5, -21], [x1 - 10, 18.5, -20], [x1, 18, -19]] : [[x0, 20, -22], [x1 - 10, 19, -21], [x1, 18.5, -20]];
-  for (const [x, hw, yb] of prof) rings.push({ x, pts: uSec(hw, yb, 11, 3.4, 10) });
-  k.add(mat, loftX(rings, { caps: false }));
+  const x0 = AK.FRONT + 2, x1 = 212, YT = 11;
+  const key = o.paddle ? [[x0, 22, -22], [x0 + 20, 23.5, -23], [x0 + 55, 21, -22], [x0 + 80, 18.5, -21], [x1 - 10, 18.5, -20], [x1, 18, -19]] : o.ribs ? [[x0, 20.4, -22], [x0 + 40, 20.2, -22.2], [x1 - 22, 19.2, -21.4], [x1 - 9, 21, -24.4], [x1 - 4, 21, -24.4], [x1, 19.4, -21.4]] : [[x0, 20, -22], [x1 - 10, 19, -21], [x1, 18.5, -20]];
+  const prof = smoothProf(key, 4);
+  const rings = prof.map(([x, hw, yb]) => ({ x, pts: uSec(hw, yb, YT, 3.4, 12) }));
+  k.add(mat, loftX(rings, { caps: false, flip: true }));
   k.add(mat, extrudeX(rings[0].pts, x0, x0 + 1.2, { bevel: 0.3 }));
   k.add(mat, extrudeX(rings[rings.length - 1].pts, x1 - 1.2, x1, { bevel: 0.3 }));
-  if (o.ribs) for (let i = 0; i < 4; i++) for (const s of [-1, 1]) k.add(mat, T(box(x1 - x0 - 34, 1.8, 1.4, { bevel: 0.4 }), { p: [(x0 + x1) / 2 + 10, 6 - i * 6.5, s * 19.3] }));
+  k.add("steel", extrudeX(uSec(key[0][1] + 0.6, key[0][2] - 0.6, YT, 1.4, 12), x0 - 1, x0 + 5, { bevel: 0.4 }));
+  if (o.ribs) {
+    const rp = prof.filter(([x]) => x >= x0 + 12 && x <= x1 - 26);
+    for (const s of [-1, 1]) {
+      for (const y of [7.5, 3, -1.5]) k.add(mat, uRib(rp, YT, s, { y }));
+      for (const a of [22, 44, 66]) k.add(mat, uRib(rp, YT, s, { a }));
+    }
+    for (const s of [-1, 1]) k.add(mat, uRib(prof.filter(([x]) => x >= x1 - 12 && x <= x1 - 3), YT, s, { a: 50 }, 1.2, 0.8));
+  }
 }
 function upperStd(ctx, k, mat, o = {}) {
   k.add(mat, extrudeX(upperSec(13.2, 12), 100, 288, { bevel: 2 }));
-  if (o.ribs) for (let i = 0; i < 5; i++) {
-    const a = (i - 2) * 24 * Math.PI / 180;
-    k.add(mat, T(box(160, 1.6, 2, { bevel: 0.4 }), { p: [196, AK.GAS_Y + 13.3 * Math.cos(a), 13.3 * Math.sin(a)], r: [-(i - 2) * 24, 0, 0] }));
-  }
+  if (o.ribs) for (let i = 0; i < 5; i++) k.add(mat, T(T(cylX(1.3, 114, 278, { c: 1.2, seg: 10 }), { s: [1, 0.6, 1], p: [0, 13.1, 0] }), { r: [(i - 2) * 24, 0, 0] }).translate(0, AK.GAS_Y, 0));
   k.add("steel", extrudeX(upperSec(13.8, 11), 284, 292, { bevel: 0.8 }));
+  k.add("steel", extrudeX(upperSec(13.6, 11.6), 99, 103, { bevel: 0.6 }));
 }
 function retainer(ctx, k) {
-  k.add("steel", extrudeX(shape(uSec(20.2, -22.2, 12, 3, 10).slice(0, 13).concat(uSec(20.2, -22.2, 12, 3, 10).slice(13))), 208, 222, { bevel: 0.8 }));
-  k.add("steel", T(cylZ(2.4, 19, 21.5, { seg: 12 }), { p: [215, 4, 0] }));
+  k.add("steel", extrudeX(shape(uSec(20.2, -22.2, 12, 3, 10)), 208, 222, { bevel: 0.8 }));
+  k.add("steel", T(latheX([[0, 0], [0, 3.2], [0.6, 3.2], [1.4, 2.4], [1.6, 0]], { seg: 16 }), { r: [0, -90, 0], p: [215, 4, 20] }));
+  k.add("steel", extrudeZ([[212.2, 3, 2.4], [217.8, 3, 2.4], [217, 16, 2], [213.4, 16, 2]], 1.6, { bevel: 0.5, z: 21 }));
   k.add("steel", T(cylZ(3.6, -12, 12, { seg: 16 }), { p: [215, -15, 0] }));
 }
 function hgStd(ctx, o) {
@@ -6875,28 +7726,52 @@ function akMag(ctx, o) {
   const shiftX = -front[0][0], shiftY = 0;
   const P = [[front[0][0], 12], [back[0][0], 12], ...back.slice(1), ...front.slice().reverse()].map(([x, y]) => [x + shiftX, y + shiftY]);
   k.add(o.mat, extrudeZ(P.map((p) => [...p, 0]), W, { bevel: o.bevel ?? 1.2 }));
-  const endA = ang0 + L / R4;
-  const ex = cx + Math.cos(endA) * R4 + shiftX, ey = cy + Math.sin(endA) * R4;
+  const at = (i) => {
+    const u = i / n, a = ang0 + u * L / R4;
+    return { a, d: D0 + (D1 - D0) * u, x: cx + Math.cos(a) * R4 + shiftX, y: cy + Math.sin(a) * R4 };
+  };
+  const steel = o.mat.startsWith("steel");
+  const lugM = steel ? o.mat : "steel";
   if (o.ribs) {
     const m = 4;
     for (let j = 1; j < m; j++) {
       const pts = [];
       for (let i = 1; i < n; i++) {
-        const s = i / n * L, a = ang0 + s / R4, d = D0 + (D1 - D0) * (i / n);
-        const t = j / m - 0.5;
-        pts.push([cx + Math.cos(a) * (R4 + t * d) + shiftX, Math.sin(a) * (R4 + t * d), 0]);
+        const q = at(i), t = j / m - 0.5;
+        pts.push([cx + Math.cos(q.a) * (R4 + t * q.d) + shiftX, Math.sin(q.a) * (R4 + t * q.d), 0]);
       }
-      for (const s of [-1, 1]) k.add(o.ribMat || o.mat, wire(pts.map((p) => [p[0], p[1], s * (W / 2 + 0.2)]), 1.3, { n: 40, seg: 6 }));
+      for (const s of [-1, 1]) k.add(o.ribMat || o.mat, T(wire(pts, 1.4, { n: 50, seg: 8 }), { s: [1, 1, 0.55] }).translate(0, 0, s * (W / 2 - 0.1)));
     }
+    for (const s of [-1, 1]) k.add(o.mat, T(T(cylX(1.3, -(D0 - 10) / 2, (D0 - 10) / 2, { c: 1.1, seg: 10 }), { s: [1, 1, 0.5] }), { p: [-D0 / 2, -4, s * (W / 2 - 0.1)] }));
   }
-  if (o.cross) for (let i = 2; i < n - 1; i += 3) {
-    const s = i / n * L, a = ang0 + s / R4, d = D0 + (D1 - D0) * (i / n);
-    for (const sd of [-1, 1]) k.add(o.mat, T(box(d - 10, 2.2, 1.4, { bevel: 0.5 }), { p: [cx + Math.cos(a) * R4 + shiftX, Math.sin(a) * R4, sd * (W / 2 + 0.3)], r: [0, 0, a * 57.3] }));
+  if (o.cross) for (let i = 2; i <= n - 2; i += 2) {
+    const q = at(i), h = (q.d - 16) / 2;
+    for (const sd of [-1, 1]) k.add(o.mat, T(T(cylX(2.6, -h, h, { c: 2.2, seg: 12 }), { s: [1, 1, 0.36] }), { r: [0, 0, q.a * 57.2958], p: [q.x, q.y, sd * (W / 2 - 0.1)] }));
   }
+  if (steel) for (const edge of [back, front]) {
+    const pts = edge.slice(1, n).map(([x, y], i) => {
+      const q = at(i + 1), sg = edge === back ? 1 : -1;
+      return [x + shiftX + sg * Math.cos(q.a) * 0.2, y + sg * Math.sin(q.a) * 0.2, 0];
+    });
+    k.add(o.mat, T(wire(pts, 1.6, { n: 50, seg: 8 }), { s: [1, 1, 1.4] }));
+  }
+  const endA = ang0 + L / R4;
+  const ex = cx + Math.cos(endA) * R4 + shiftX, ey = cy + Math.sin(endA) * R4;
   const tx = -Math.sin(endA), ty = Math.cos(endA);
-  k.add(o.plate || o.mat, T(box(D1 + 7, 6, W + 3, { bevel: 1.6 }), { p: [ex + tx * 2, ey + ty * 2, 0], r: [0, 0, endA * 57.3] }));
-  k.add(o.mat, T(box(8, 6, W - 6), { p: [2, 8, 0] }));
-  k.add(o.mat, T(box(6, 5, W - 4), { p: [-D0 + 4, 9, 0] }));
+  const plateT = () => ({ r: [0, 0, endA * 57.2958], p: [ex + tx * 2, ey + ty * 2, 0] });
+  const PM = o.plate || o.mat;
+  k.add(PM, box(D1 + 7, 6, W + 3, { bevel: 1.6 }), plateT());
+  for (const s of [-1, 1]) k.add(PM, T(box(D1 + 2, 5, 1.2, { bevel: 0.4 }), { p: [0, -4.4, s * (W / 2 + 0.7)] }), plateT());
+  if (steel) {
+    k.add(PM, T(box(D1 - 12, 1.4, 7, { bevel: 0.6 }), { p: [0, 3.2, 0] }), plateT());
+    for (const x of [-(D1 / 2) + 8, D1 / 2 - 8]) k.add(PM, T(tubeX(2.8, 1.6, 0, 0.6, { seg: 16, c: 0.2 }), { r: [0, 0, 90], p: [x, 2.8, 0] }), plateT());
+  } else {
+    k.add("lensBlack", T(cylY(3.2, 2.9, 3.15, { seg: 16, c: 0.05 }), { p: [0, 0, 0] }), plateT());
+    k.add("steel", T(cylY(2.2, 2.4, 3.1, { seg: 12, c: 0.3 }), { p: [0, 0, 0] }), plateT());
+    k.add(PM, T(box(4, 7, W - 4, { bevel: 1.2 }), { p: [D1 / 2 + 3.5, 0.8, 0] }), plateT());
+  }
+  k.add(lugM, T(box(8, 6, W - 6, { bevel: 0.8 }), { p: [2, 8, 0] }));
+  k.add(lugM, T(box(3.4, 6.4, W - 8, { bevel: 0.8 }), { p: [-D0 - 0.9, 2.4, 0] }));
   const cal = o.cal;
   ctx.C.feedLips(k, o.mat, -D0 + 6, -D0 + 42, 12, W / 2, { rise: 5.2, curl: 3.4 });
   ctx.C.cartridge(rk, cal, { p: [-D0 + 8, 13.5, -3.4], r: [0, 0, 3] });
@@ -6920,7 +7795,8 @@ function akGrip(ctx, o) {
   const front = o.front.map(([f, y]) => [sh(y) + f, y]);
   const back = o.back.map(([f, y]) => [sh(y) + f, y]);
   const W = o.w ?? 30;
-  k.add(o.mat, gripLoft(front, back, { w: W, k: 2.8, taper: 0.22, width: (t) => 0.9 + 0.1 * Math.sin(Math.PI * t) }));
+  const body = gripLoft(front, back, { w: W, k: 2.8, taper: 0.22, width: (t) => 0.9 + 0.1 * Math.sin(Math.PI * t) });
+  k.add(o.mat, body);
   if (o.grooves) for (let i = 0; i < o.grooves; i++) for (const s of [-1, 1]) {
     k.add(o.mat, T(box(1.6, 58, 1.2, { bevel: 0.5 }), { p: [sh(-52) - 9 - i * 3.3, -52, s * (W / 2 * 0.93 - 0.3)], r: [0, 0, -o.angle] }));
   }
@@ -6932,15 +7808,35 @@ function akGrip(ctx, o) {
 function stockLoft(prof, k = 3.4) {
   return loftX(prof.map(([x, cy, hh, hw]) => ({ x, pts: superEllipse(hw, hh, k, 28, cy, 0) })));
 }
+function grainAlong(g, dx, dy) {
+  const l = Math.hypot(dx, dy), c = dx / l, s = dy / l;
+  const p = g.attributes.position, uv = g.attributes.uv;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    uv.setXY(i, x * c + y * s, -x * s + y * c + z);
+  }
+  return g;
+}
+function slotScrew(k, x, y, z = 0, r = 3.2) {
+  k.add("steelWorn", T(latheX([[0, 0], [0, r], [0.5, r - 0.1], [1.1, r * 0.75], [1.3, 0]], { seg: 16 }), { r: [0, 180, 0], p: [x, y, z] }));
+  k.add("lensBlack", T(box(0.9, 0.8, r * 1.8, { bevel: 0.1 }), { p: [x - 1.05, y, z] }));
+}
 function stockAKM(ctx) {
   const k = ctx.kit();
   const prof = [[-2, -6, 18, 14.6], [-30, -12, 22, 16], [-80, -26, 34, 17.6], [-140, -42, 48, 19], [-196, -60, 60, 20.4], [-206, -63, 62, 20.6]];
-  k.add("wood", stockLoft(prof));
+  k.add("wood", grainAlong(stockLoft(prof), 204, 57));
   k.add("steel", extrudeX(shape(superEllipse(21, 63, 3.4, 28, -63, 0)), -212, -205, { bevel: 1.2 }));
-  k.add("steel", extrudeX(rrect(0, -80, 24, 44, 8), -213, -211.5, { bevel: 0.3 }));
-  k.add("steel", T(cylZ(2.2, -12, 12, { seg: 12 }), { p: [-212, -62, 0] }));
-  for (const y of [-10, -114]) k.add("steel", T(cylX(2.6, -214, -211, { seg: 12 }), { p: [0, y, 0] }));
-  k.add("steel", extrudeZ([[4, 6], [-30, -2], [-30, -8], [4, -2]], 12, { bevel: 0.6 }));
+  k.add("steel", extrudeX(shape(superEllipse(21.4, 63.4, 3.4, 28, -63, 0), [superEllipse(20.2, 62.2, 3.4, 28, -63, 0)]), -206, -202.5, { bevel: 0.5 }));
+  const door = rrect(0, -80, 24, 44, 8);
+  k.add("lensBlack", extrudeX(shape(rrect(0, -80, 25.2, 45.2, 8.4), [door]), -212.25, -211.8, { bevel: 0.05 }));
+  k.add("steel", extrudeX(rrect(0, -80, 23.4, 43.4, 7.8), -212.7, -211.6, { bevel: 0.4 }));
+  k.add("steelWorn", T(cylZ(1.5, -7, 7, { seg: 12, c: 0.3 }), { p: [-212.6, -57.2, 0] }));
+  k.add("steel", T(tubeX(3.4, 2, 0, 0.5, { seg: 18, c: 0.15 }), { r: [0, 180, 0], p: [-212.6, -92, 0] }));
+  for (const y of [-10, -116]) slotScrew(k, -212, y);
+  k.add("steel", extrudeZ([[4, 6], [-30, -2, 2], [-30, -8, 2], [4, -2]], 12, { bevel: 0.6 }));
+  k.add("steelWorn", T(latheX([[0, 0], [0, 3], [0.5, 2.9], [1.1, 2.2], [1.3, 0]], { seg: 16 }), { r: [0, 0, 90], p: [-22, 0.2, 0] }));
+  k.add("lensBlack", T(box(5.4, 0.8, 0.9, { bevel: 0.1 }), { p: [-22, 1.3, 0], r: [0, 30, 0] }));
+  k.add("steel", extrudeZ(rrect(-175, -64, 26, 9, 3), 1.6, { bevel: 0.4, z: -20.4 }));
   k.add("steel", wire([[-166, -64, -20], [-166, -64, -27], [-184, -64, -27], [-184, -64, -20]], 1.8, { n: 30 }));
   return { root: k.build("akm_wood"), cheek: { x: -60, y: 8 } };
 }
@@ -6949,14 +7845,34 @@ function stockAK74M(ctx) {
   const prof = [[-10, -6, 18, 15], [-40, -13, 23, 16.5], [-90, -28, 36, 18], [-150, -44, 49, 19.4], [-205, -62, 60, 20.6], [-214, -64, 61, 20.6]];
   const f = ctx.kit();
   f.add("poly", stockLoft(prof, 3.8));
-  for (const s of [-1, 1]) f.add("polySoft", T(extrudeZ([[-40, -18, 6], [-180, -58, 10], [-180, -96, 10], [-60, -40, 6]], 1, { bevel: 0.3 }), { p: [0, 0, s * 18.6] }));
+  const win = [[-50, -6], [-180, -31], [-180, -78], [-56, -27]];
+  for (const s of [-1, 1]) {
+    const t = { r: [0, s * 1.455, 0], p: [0, 0, 0] };
+    f.add("polySoft", T(extrudeZ([[-50, -6, 6], [-180, -31, 10], [-180, -78, 10], [-56, -27, 6]], 1, { bevel: 0.3, z: s * 15.18 }), t));
+    const loop = [];
+    for (let i = 0; i < 4; i++) {
+      const a = win[i], b = win[(i + 1) % 4];
+      for (let j = 0; j < 6; j++) {
+        const u = j / 6;
+        loop.push([a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, s * 15.33]);
+      }
+    }
+    f.add("poly", T(wire(loop, 0.9, { closed: true, n: 120, seg: 6, tension: 0.2 }), t));
+  }
   f.add("rubber", extrudeX(shape(superEllipse(21.4, 62, 3.8, 28, -64, 0)), -224, -213, { bevel: 2 }));
-  for (let i = 0; i < 9; i++) f.add("rubber", T(box(2, 2.4, 38), { p: [-224, -16 - i * 12, 0] }));
+  for (let i = 0; i < 9; i++) f.add("rubber", T(cylZ(1.1, -18.5, 18.5, { seg: 8, c: 0.8 }), { p: [-224.4, -16 - i * 12, 0] }));
+  f.add("poly", extrudeX(shape(superEllipse(21.2, 61.2, 3.8, 28, -64, 0)), -214, -211, { bevel: 0.8 }));
+  f.add("steel", extrudeZ(rrect(-196, -64, 20, 8, 3), 1.6, { bevel: 0.4, z: -20.8 }));
+  f.add("steel", wire([[-189, -64, -20.5], [-189, -64, -27], [-203, -64, -27], [-203, -64, -20.5]], 1.8, { n: 30 }));
   f.add("steel", extrudeX(rrect(0, -4, 30, 26, 3), -14, -1, { bevel: 1 }));
+  f.add("steel", extrudeX(rrect(0, -4, 31.4, 27.4, 3.4), -16, -13, { bevel: 0.6 }));
+  for (const y of [-14, 2]) f.add("steel", T(cylY(5.2, y, y + 7, { c: 0.6, seg: 18 }), { p: [0, 0, -22] }));
   const fold = node("fold", [f.build()]);
   k.add("steel", extrudeZ([[4, 10], [-4, 10], [-4, -22], [4, -22]], 12, { bevel: 1, z: -20 }));
-  k.add("steel", T(cylY(4, -22, 11, { seg: 16 }), { p: [0, 0, -22] }));
-  k.add("steel", T(cylZ(5.5, 8, 13, { seg: 18 }), { p: [-2, -4, 0] }));
+  for (const y of [-21, -7, 9]) k.add("steel", T(cylY(5, y, y + (y === 9 ? 2 : 7), { c: 0.6, seg: 18 }), { p: [0, 0, -22] }));
+  for (const [y, d] of [[11, 1], [-22, -1]]) k.add("steelWorn", T(latheX([[0, 0], [0, 3], [0.5, 2.9], [1, 2.2], [1.2, 0]], { seg: 14 }), { r: [0, 0, d * 90], p: [0, y, -22] }));
+  k.add("steel", T(cylZ(5.4, -16.4, -14.9, { seg: 20, c: 0.4 }), { p: [12, 5, 0] }));
+  k.add("steelWorn", T(ctx.C.knob(4.4, 3.4, 16), { r: [0, 90, 0], p: [12, 5, -16.2] }));
   fold.position.set(0, 0, -22);
   fold.children[0].position.set(0, 0, 22);
   return { root: node("ak74m_fold", [k.build(), fold]), fold: { node: fold, axis: "y", angle: -172 }, cheek: { x: -70, y: 8 } };
@@ -7087,7 +8003,7 @@ var ak74_default = {
   base: { weight: 2020, length: 860, ergo: 48, recoilV: 92, recoilH: 90, moa: 2.4, velocity: 900, range: 450, loud: 158, flash: 60, adsTime: 290, rpm: 650, mag: 30 },
   audio: { cal: "545", mech: 0.95 },
   modes: ["safe", "auto", "semi"],
-  build: (ctx) => akBase(ctx, { id: "ak74", steel: "steel", dimples: false, gas45: true, bayonet: true }),
+  build: (ctx) => akBase(ctx, { id: "ak74", steel: "steel", dimples: true, gas45: true, bayonet: true }),
   slots: akSlots(),
   parts: akParts("ak74"),
   defaults: {

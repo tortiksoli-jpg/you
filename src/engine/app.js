@@ -559,7 +559,10 @@ export async function boot(def, lib) {
   const activeLaser = () => lasers.find((l) => (batt[devKey(l)] ?? 1) > 0) || null;
   // Свечение линз по фактическому выходу (0..1).
   function lensGlow(kl, kz) {
-    for (const l of lights) l.data.lens.material.emissiveIntensity = st.light ? 7 * kl : 0;
+    for (const l of lights) {
+      l.data.lens.material.emissiveIntensity = st.light ? 7 * kl : 0;
+      if (l.data.refl) l.data.refl.material.emissiveIntensity = st.light ? 0.9 * kl : 0;
+    }
     for (const l of lasers) l.data.lens.material.emissiveIntensity = st.laser ? 5 * kz : 0;
   }
   function drain(dt) {
@@ -973,7 +976,7 @@ export async function boot(def, lib) {
     // Частичная: ночью темно остаётся темно, а стена в метре от фонаря слепит.
     const amb = S.ambient();
     const Lsc = amb * 0.5 + beamE;
-    st.expTarget = clamp(Math.pow(1.1 / Math.max(1e-5, Lsc), 0.62), 0.32, 11);
+    st.expTarget = clamp(Math.pow(1.2 / Math.max(1e-5, Lsc), 0.62), 0.32, 11);
     const nvOn = document.body.classList.contains('nv');
     const tgt = st.expTarget * (nvOn ? 18 : 1);
     const tau = tgt > st.exposure ? 2.2 : 0.22;
@@ -1058,7 +1061,7 @@ export async function boot(def, lib) {
   let activeDpr = maxDpr, curDpr = maxDpr, fts = [], ftT = 0, slowStreak = 0;
   const bootT = performance.now();
   const gunPrev = new THREE.Matrix4();
-  const setDpr = (v) => { if (Math.abs(v - curDpr) < 0.01) return; curDpr = v; R.setPixelRatio(v); R.setSize(innerWidth, innerHeight); };
+  const setDpr = (v) => { if (Math.abs(v - curDpr) < 0.01) return; curDpr = v; R.setPixelRatio(v); R.setSize(innerWidth, innerHeight); S.resize(); };
   function simBusy() {
     const r = st.rec;
     if (st.ads || st.adsT > 0 || st.trigger || st.busy || st.light || st.laser || tw.list.length || fx.active()) return true;
@@ -1105,7 +1108,7 @@ export async function boot(def, lib) {
     if (busy || sceneDirty || !gunPrev.equals(gun.matrixWorld)) R.shadowMap.needsUpdate = true;
     gunPrev.copy(gun.matrixWorld);
     camDirty = false; sceneDirty = false;
-    R.render(S.scene, S.camera);
+    S.render();
   };
   loop();
   return app;

@@ -450,6 +450,9 @@ export function loftY(rings, o = {}) {
     const x = p.getX(i), y = p.getY(i); p.setXY(i, y, x);
     const nx = n.getX(i), ny = n.getY(i); n.setXY(i, ny, nx);
   }
+  // Перестановка осей — зеркальное отражение: обход граней после неё смотрит наружу,
+  // а нормали — внутрь. Разворачиваем нормали, иначе рукояти выглядят чёрными.
+  for (let i = 0; i < n.count; i++) n.setXYZ(i, -n.getX(i), -n.getY(i), -n.getZ(i));
   return g;
 }
 
@@ -482,7 +485,28 @@ export function gripLoft(front, back, o = {}) {
     }
     rings.push({ y, pts });
   }
-  return loftY(rings, { crease: o.crease ?? 60 });
+  const g = loftY(rings, { crease: o.crease ?? 60 });
+  // торцевые крышки лофта вывернуты: тело рукояти звёздно относительно центра —
+  // разворачиваем наружу все грани, смотрящие внутрь
+  const p = g.attributes.position, nr = g.attributes.normal;
+  const c = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), d = new THREE.Vector3(), f = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) c.add(a.fromBufferAttribute(p, i));
+  c.divideScalar(p.count);
+  for (let t = 0; t < p.count; t += 3) {
+    a.fromBufferAttribute(p, t); b.fromBufferAttribute(p, t + 1); d.fromBufferAttribute(p, t + 2);
+    f.crossVectors(b.clone().sub(a), d.clone().sub(a));
+    if (f.dot(a.add(b).add(d).divideScalar(3).sub(c)) >= 0) continue;
+    for (const attr of [p, nr, g.attributes.uv]) {
+      if (!attr) continue;
+      for (let k = 0; k < attr.itemSize; k++) {
+        const v = attr.array[(t + 1) * attr.itemSize + k];
+        attr.array[(t + 1) * attr.itemSize + k] = attr.array[(t + 2) * attr.itemSize + k];
+        attr.array[(t + 2) * attr.itemSize + k] = v;
+      }
+    }
+    for (let k = t; k < t + 3; k++) nr.setXYZ(k, -nr.getX(k), -nr.getY(k), -nr.getZ(k));
+  }
+  return g;
 }
 
 // Тело по верхнему и нижнему контурам вдоль X (точки [x, y], x возрастает):

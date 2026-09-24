@@ -9,60 +9,141 @@ const UP_REAR = -192, UP_FRONT = 266, BARREL = 406;
 
 const YB = -16;   // низ верхней коробки (линия разъёма с нижней)
 const HB = -44;   // низ цевья монолита (почти до уровня спусковой скобы)
+const W = 19, W2 = 18.3;          // полуширина коробки: низ и верх над продольной ступенькой
+const HW = 21;                    // полуширина цевья
+const PY0 = -12, PY1 = 1.5;       // окно выброса по высоте
+const SLY0 = 3.5, SLY1 = 9.5;     // паз рукояти заряжания (оба борта)
+const SL0 = -66, SL1 = 104;
+const RB = 13.2;                  // канал затворной рамы
+
+// Винт с внутренним шестигранником; s = +1 правый борт, −1 левый.
+function hexScrew(k, x, y, z, s, r = 2.6, mat = 'steelPark') {
+  const head = G.cylZ(r, 0, 1.2, { c: 0.45, seg: 20 });
+  const sock = G.cylZ(r * 0.46, 0.95, 1.28, { c: 0, seg: 6 });
+  const t = { p: [x, y, z], s: [1, 1, s] };
+  k.add(mat, G.T(head, t));
+  k.add('lensBlack', G.T(sock, t));
+}
+
+// Головка оси/штифта с фаской.
+function pinHead(k, x, y, z, s, r = 3, h = 1, mat = 'steel') {
+  k.add(mat, G.T(G.cylZ(r, 0, h, { c: 0.4, seg: 18 }), { p: [x, y, z], s: [1, 1, s] }));
+}
+
+// Гнездо быстросъёмной антабки: стальная втулка с отверстием.
+function qdSocket(k, x, y, z, s) {
+  k.add('steel', G.T(G.cylZ(5.4, 0, 1.8, { c: 0.5, seg: 24, ri: 3.2 }), { p: [x, y, z], s: [1, 1, s] }));
+  k.add('lensBlack', G.T(G.cylZ(3.3, 0, 0.6, { c: 0, seg: 16 }), { p: [x, y, z + s * 0.3] }));
+}
+
+// Сечение ствольной коробки (z, y): ступенька вдоль борта, скосы под планкой,
+// пазы рукояти заряжания и окно выброса справа (вырез в канал рамы).
+function recSec(o = {}) {
+  const side = (slot) => {
+    const s = [];
+    if (slot) s.push([W2, SLY0 - 0.2, 0.3], [W2 - 2.6, SLY0 + 0.3], [W2 - 2.6, SLY1 - 0.3], [W2, SLY1 + 0.2, 0.3]);
+    s.push([W2, 12.5, 1.6], [15.2, 20.6, 1]);
+    return s;
+  };
+  const low = [[W, YB, 1], [W, 2, 0.3], [W2, 2.8, 0.3]];
+  const R = o.port ? [[W2, PY1, 0.4], ...side(o.slotR)] : [...low, ...side(o.slotR)];
+  const L = [...low, ...side(o.slotL)].reverse().map(([z, y, r]) => [-z, y, r || 0]);
+  const pts = [...R, ...L];
+  if (o.port) {
+    pts.push([W, YB, 1], [W, PY0, 0.4]);
+    const a0 = Math.asin(PY0 / RB), a1 = Math.asin(PY1 / RB) - Math.PI * 2;
+    for (let i = 0; i <= 28; i++) { const a = a0 + (a1 - a0) * (i / 28); pts.push([Math.cos(a) * RB, Math.sin(a) * RB]); }
+  }
+  return pts;
+}
+
+// Сечение цевья монолита: скосы нижней кромки к нижней планке, канал ствола.
+function hgSec(slot, bot = HB) {
+  const R = [[12, bot, 2.5], [HW, bot + 9, 1.5]];
+  if (slot) R.push([HW, SLY0 - 0.2, 0.3], [HW - 4.4, SLY0 + 0.3], [HW - 4.4, SLY1 - 0.3], [HW, SLY1 + 0.2, 0.3]);
+  R.push([HW, 12.5, 1.6], [16.6, 20.6, 1]);
+  const L = R.slice().reverse().map(([z, y, r]) => [-z, y, r || 0]);
+  return G.shape([...R, ...L], [G.circle(0, 0, 15.6, 32)]);
+}
 
 function upper(ctx, k) {
   const M = 'aluFde';
-  // монолит: плоские борта, скосы под планкой; коробка заметно выше, чем у AR
-  const A = [[19, YB, 1], [19, 12, 2], [15, 21, 2], [-15, 21, 2], [-19, 12, 2], [-19, YB, 1]];
-  const rB = 13.2, yT = 7, yB = -8;
-  const port = [[19, yT], [19, 12], [15, 21], [-15, 21], [-19, 12], [-19, YB], [19, YB], [19, yB]];
-  const a0 = Math.atan2(yB, Math.sqrt(rB * rB - yB * yB)), a1 = Math.atan2(yT, Math.sqrt(rB * rB - yT * yT)) - Math.PI * 2;
-  for (let i = 0; i <= 28; i++) { const a = a0 + (a1 - a0) * (i / 28); port.push([Math.cos(a) * rB, Math.sin(a) * rB]); }
-  k.add(M, G.extrudeX(A, UP_REAR, -74, { bevel: 1 }));
-  k.add(M, G.extrudeX(port, -74, 6, { bevel: 0.3 }));
-  k.add(M, G.extrudeX(A, 6, 48, { bevel: 0.8 }));
+  // монолит собран из участков: у стыков фаски дают тонкие линии разъёма
+  k.add(M, G.extrudeX(recSec(), UP_REAR + 1, -74, { bevel: 0.6 }));
+  k.add(M, G.extrudeX(recSec({ port: true }), -74, SL0, { bevel: 0.3 }));
+  k.add(M, G.extrudeX(recSec({ port: true, slotL: true, slotR: true }), SL0, 6, { bevel: 0.3 }));
+  k.add(M, G.extrudeX(recSec({ slotL: true, slotR: true }), 6, 48, { bevel: 0.3 }));
+  k.add(M, G.extrudeX(hgSec(true), 48, SL1, { bevel: 0.8 }));
+  k.add(M, G.extrudeX(hgSec(false), SL1, UP_FRONT - 30, { bevel: 0.3 }));
+  k.add(M, G.extrudeX(hgSec(false, HB + 10), UP_FRONT - 30, UP_FRONT, { bevel: 1.4 }));
+  // дно пазов рукояти заряжания — тёмное (там ходит ползун рамы)
+  for (const s of [-1, 1]) {
+    k.add('lensBlack', G.extrudeZ(G.rrect((SL0 + 48) / 2, (SLY0 + SLY1) / 2, 48 - SL0 - 1, SLY1 - SLY0 - 0.8, 0.5), 0.2, { bevel: 0, z: s * (W2 - 2.5) }));
+    k.add('lensBlack', G.extrudeZ(G.rrect((48 + SL1) / 2, (SLY0 + SLY1) / 2, SL1 - 48 - 1, SLY1 - SLY0 - 0.8, 0.5), 0.2, { bevel: 0, z: s * (HW - 4.3) }));
+  }
   // внутренняя полость коробки за окном — тёмная (видна, когда рама отходит)
   const liner = [];
   for (let i = 0; i <= 24; i++) { const a = (35 + (i / 24) * 290) * Math.PI / 180; liner.push([Math.cos(a) * 13.1, Math.sin(a) * 13.1]); }
   for (let i = 24; i >= 0; i--) { const a = (35 + (i / 24) * 290) * Math.PI / 180; liner.push([Math.cos(a) * 12.7, Math.sin(a) * 12.7]); }
   k.add('lensBlack', G.extrudeX(liner, -74, 6, { bevel: 0 }));
-  // цевьё монолита: шире и глубже коробки, передний торец скошен снизу
-  const B = G.shape([[-21, HB, 4], [21, HB, 4], [21, 13, 2], [17, 21, 2], [-17, 21, 2], [-21, 13, 2]], [G.circle(0, 0, 16.5, 28)]);
-  k.add(M, G.extrudeX(B, 44, UP_FRONT - 24, { bevel: 1.4 }));
-  k.add(M, G.extrudeZ(G.shape([[UP_FRONT - 25, HB, 4], [UP_FRONT - 14, HB, 3], [UP_FRONT, -8, 3], [UP_FRONT, 20, 1], [UP_FRONT - 25, 20]]), 42, { bevel: 1.4 }));
-  // «подбородок» — плавный переход от приёмника магазина к цевью
-  k.add(M, G.extrudeZ([[14, YB + 1], [50, YB + 1], [50, HB, 2], [40, HB + 1, 12], [22, YB - 7, 8], [14, YB - 3, 3]], 42, { bevel: 1.4 }));
-  // борта: продольный пояс-ребро по всей длине и паз рукояти заряжания
+  // канал ствола в переднем торце — тёмный зазор вокруг ствола
+  k.add('lensBlack', G.cylX(15.5, UP_FRONT - 6, UP_FRONT - 5, { c: 0, seg: 32 }));
+  // «подбородок»: изогнутый переход от приёмника магазина к глубокому цевью
+  k.add(M, G.extrudeZ([[14, YB + 1], [52, YB + 1], [52, HB + 2], [47, HB, 3], [38, HB + 2, 10], [24, YB - 12, 10], [16, YB - 5, 3]], 32, { bevel: 4, bevelSeg: 3 }));
   for (const s of [-1, 1]) {
-    k.add(M, G.extrudeZ([[UP_REAR + 8, -1.5, 1], [44, -1.5, 1], [44, 1.5, 1], [UP_REAR + 8, 1.5, 1]], 1.4, { bevel: 0.4, z: s * 19.5 }));
-    k.add(M, G.extrudeZ([[48, -3.5, 1], [UP_FRONT - 150, -3.5, 1], [UP_FRONT - 150, -0.5, 1], [48, -0.5, 1]], 1.4, { bevel: 0.4, z: s * 21.5 }));
-    k.add('lensBlack', G.extrudeZ([[-60, 3.5, 2], [44, 3.5, 2], [44, 9, 2], [-60, 9, 2]], 0.8, { bevel: 0.2, z: s * 19.05 }));
-    k.add('lensBlack', G.extrudeZ([[44, 3.5, 0], [104, 3.5, 2], [104, 9, 2], [44, 9, 0]], 0.8, { bevel: 0.2, z: s * 21.05 }));
-    // нижняя кромка цевья: фаска-«лыжа» и вентиляционные прорези
-    for (let i = 0; i < 5; i++) k.add('lensBlack', G.extrudeZ(G.slot(70 + i * 16, 78 + i * 16, -30, 5), 0.8, { bevel: 0.2, z: s * 21.05 }));
+    // плоская «плита» борта цевья со скошенной задней кромкой
+    k.add(M, G.extrudeZ([[54, -4, 1], [117, -4, 1], [117, -34, 2], [72, -34, 3], [56, -22, 3]], 1.6, { bevel: 0.5, z: s * (HW + 0.2) }));
+    // площадка под боковую планку
+    k.add(M, G.extrudeZ(G.rrect(191, 4, 146, 24, 2), 1.6, { bevel: 0.5, z: s * (HW + 0.2) }));
+    // облегчающие пазы на плите
+    for (let i = 0; i < 4; i++) k.add('lensBlack', G.extrudeZ(G.slot(76 + i * 10, 82 + i * 10, -27, 3.6), 0.3, { bevel: 0, z: s * (HW + 0.95) }));
+    // продольная риска-канавка под плечами планки
+    k.add('lensBlack', G.extrudeZ([[UP_REAR + 6, 14.4], [47, 14.4], [47, 14.9], [UP_REAR + 6, 14.9]], 0.2, { bevel: 0, z: s * W2 }));
+    k.add('lensBlack', G.extrudeZ([[49, 14.4], [UP_FRONT - 2, 14.4], [UP_FRONT - 2, 14.9], [49, 14.9]], 0.2, { bevel: 0, z: s * HW }));
+    // винты плиты и крепления нижней планки
+    for (const x of [62, 110]) hexScrew(k, x, -10, s * (HW + 1), s, 2.4);
+    for (const x of [134, 184, 234]) hexScrew(k, x, -18, s * (HW + 1), s, 2.4);
+    // винты заднего узла (крепят шарнир приклада)
+    for (const y of [-7, 11]) hexScrew(k, UP_REAR + 10, y, s * (y > 2 ? W2 : W), s, 2.3);
   }
+  // стволодержатель: два поперечных болта справа, гайки слева
+  for (const x of [20, 36]) {
+    hexScrew(k, x, -7, W, 1, 3.8, 'steel');
+    k.add('steelPark', G.T(G.cylZ(4.4, -1.4, 0, { c: 0.4, seg: 6 }), { p: [x, -7, -W] }));
+  }
+  // передняя антабка QD слева
+  qdSocket(k, UP_FRONT - 15, -18, -HW, -1);
   // верхняя планка во всю длину
   const r = G.picatinny(UP_FRONT - UP_REAR - 4, { base: RAIL_TOP - 21 + 0.6 });
   k.add(M, r.geo, { p: [UP_REAR + 2, RAIL_TOP, 0] });
-  // номерные насечки на планке: белые метки через 5 пазов
-  for (let i = 0; i < r.slots; i += 5) k.add('paintWhite', G.T(G.box(1.2, 0.3, 3.2), { p: [UP_REAR + 2 + r.first + i * G.PICA.PITCH, RAIL_TOP + 0.05, 9.2] }));
-  // отражатель гильз за окном — массивный прилив
-  k.add(M, G.extrudeY(G.shape([[-96, 19], [-74, 19], [-74, 27, 2], [-88, 29, 4]]), -8, 16, { bevel: 1.2 }));
+  // номера пазов: белые риски-цифры на каждом втором зубе
+  for (let i = 0; i < r.slots - 1; i += 2) {
+    const x = UP_REAR + 2 + r.first + (i + 0.5) * G.PICA.PITCH;
+    const n = i >= 20 ? 3 : i >= 10 ? 2 : 1;
+    for (let j = 0; j < n; j++) k.add('paintWhite', G.T(G.box(0.5, 0.14, 1.8, { bevel: 0.05 }), { p: [x + (j - (n - 1) / 2) * 1.1, RAIL_TOP + 0.02, 5.4] }));
+  }
+  // отражатель гильз за окном — обтекаемый прилив, нарастает к окну
+  const defl = [];
+  for (let i = 0; i <= 12; i++) {
+    const t = i / 12, e = Math.sin(t * Math.PI / 2);
+    defl.push({ x: -110 + 36 * t, pts: G.superEllipse(0.4 + 7.8 * e, 6 + 6.6 * e, 2.8, 28, -1 + 0.3 * e, W - 1.5) });
+  }
+  k.add(M, G.loftX(defl, { crease: 50, flip: true }));
   // задний торец верха с посадкой узла приклада
-  k.add(M, G.extrudeX(G.rrect(0, 2.5, 38, 37, 4), UP_REAR - 6, UP_REAR + 1, { bevel: 1.2 }));
-  // винты: крепление боковых/нижней планок, ось ствола, заглушки
-  for (const x of [134, 184, 234]) for (const s of [-1, 1]) k.add('steel', G.T(G.screwHead(2.8, 1.4), { r: [0, s > 0 ? 0 : 180, 0] }), { p: [x, -22, s * 21.1] });
-  for (const s of [-1, 1]) k.add('steel', G.T(G.cylZ(4.2, 0, 1.6, { seg: 20 }), { p: [32, -6, s > 0 ? 19 : -20.6] }));
+  k.add(M, G.extrudeX(G.rrect(0, 2.3, 36.6, 36.2, 3.5), UP_REAR - 6, UP_REAR + 2, { bevel: 1.6, bevelSeg: 3 }));
   // боковые и нижняя планки на передней части
   const mounts = [];
   const side = (id, face, rot, pos, len = 142) => {
     const rr = G.picatinny(len, { base: 6.5 });
-    k.add('aluFde', rr.geo, { r: rot, p: pos });
+    k.add(M, rr.geo, { r: rot, p: pos });
     mounts.push(ctx.railMount(id, [pos[0] + rr.first, pos[1], pos[2]], face, rr.slots, { axis: face }));
+    return rr;
   };
-  side('rightRail', 'right', [90, 0, 0], [UP_FRONT - 146, 4, 21 + 6.1]);
-  side('leftRail', 'left', [-90, 0, 0], [UP_FRONT - 146, 4, -21 - 6.1]);
+  side('rightRail', 'right', [90, 0, 0], [UP_FRONT - 146, 4, HW + 6.1]);
+  side('leftRail', 'left', [-90, 0, 0], [UP_FRONT - 146, 4, -HW - 6.1]);
   side('bottomRail', 'bottom', [180, 0, 0], [UP_FRONT - 150, HB - 6.1, 0], 120);
+  // винты крепления боковых планок — в торцах планок
+  for (const s of [-1, 1]) for (const x of [UP_FRONT - 143, UP_FRONT - 7]) hexScrew(k, x, 4, s * (HW + 6.3), s, 2.2);
   mounts.push(ctx.railMount('topRail', [UP_REAR + 2 + r.first, RAIL_TOP, 0], 'top', r.slots, { axis: 'top' }));
   return mounts;
 }
@@ -70,63 +151,103 @@ function upper(ctx, k) {
 function lower(ctx, k, nodes) {
   const M = 'polyFde';
   // корпус УСМ: верх по линии разъёма, хвост поднимается под узел приклада
-  k.add(M, G.extrudeZ([[-188, YB], [20, YB], [22, -22, 2], [-68, -24], [-72, -42, 3], [-122, -42, 2], [-128, -46, 3], [-160, -46, 4], [-180, -34, 8], [-192, -22, 4]], 35, { bevel: 2.4 }));
+  k.add(M, G.extrudeZ([[-188, YB], [20, YB], [22, -22, 2], [-66, -24, 2], [-70, -40, 3], [-122, -42, 2], [-128, -46, 3], [-160, -46, 5], [-180, -36, 10], [-192, -22, 4]], 35, { bevel: 2.4, bevelSeg: 3 }));
   // кромка-«юбка» нижней по линии разъёма (ступенька к монолиту)
   k.add(M, G.extrudeZ([[-186, YB - 3.5], [18, YB - 3.5], [18, YB + 0.5], [-186, YB + 0.5]], 36.6, { bevel: 0.8 }));
-  // приёмник магазина с раструбом и текстурными накладками
+  // приёмник магазина с раструбом
   const well = G.shape(G.rrect(-30, 0, 90, 36, 5), [G.rrect(-30, 0, 81, 27, 2)]);
   k.add(M, G.extrudeY(well, -60, YB, { bevel: 1.4 }));
-  k.add(M, G.extrudeY(G.shape(G.rrect(-28, 0, 97, 41, 8), [G.rrect(-30, 0, 81, 27, 2)]), -70, -58, { bevel: 2 }));
+  k.add(M, G.extrudeY(G.shape(G.rrect(-28, 0, 97, 41, 8), [G.rrect(-30, 0, 81, 27, 2)]), -70, -58, { bevel: 2, bevelSeg: 3 }));
   // передний скос приёмника — характерный «клюв» SCAR
-  k.add(M, G.extrudeZ([[13, YB], [24, YB], [24, -26, 3], [21, -60, 4], [14, -70, 3], [12, -58]], 32, { bevel: 2 }));
+  k.add(M, G.extrudeZ([[13, YB], [24, YB], [24, -26, 3], [21, -60, 4], [14, -70, 3], [12, -58]], 32, { bevel: 2.4, bevelSeg: 3 }));
   for (const s of [-1, 1]) {
-    k.add('polyFdeDark', G.extrudeZ(G.shape(G.rrect(-30, -40, 60, 24, 5)), 1.4, { bevel: 0.5, z: s * 18 }));
-    for (let i = 0; i < 6; i++) k.add('polyFdeDark', G.T(G.box(52, 1.2, 1, { bevel: 0.3 }), { p: [-30, -48 + i * 3.6, s * 18.9] }));
-    // антабка-проушина в хвосте нижней
-    k.add('lensBlack', G.T(G.cylZ(3.2, -0.4, 0.4, { seg: 16 }), { p: [-176, -30, s * 17.6] }));
+    // рифлёные накладки приёмника в литой рамке
+    k.add(M, G.extrudeZ(G.shape(G.rrect(-30, -40, 64, 26, 5), [G.rrect(-30, -40, 57, 19, 3)]), 1.6, { bevel: 0.5, z: s * 18.3 }));
+    k.add('polyFdeDark', G.extrudeZ(G.rrect(-30, -40, 58, 20, 3), 0.6, { bevel: 0.2, z: s * 18.1 }));
+    for (let i = 0; i < 5; i++) k.add('polyFdeDark', G.T(G.box(53, 1.4, 1.2, { bevel: 0.4 }), { p: [-30, -47.6 + i * 3.8, s * 18.5] }));
+    // выступ-площадка хвоста нижней с антабкой QD
+    k.add(M, G.extrudeZ([[-186, -19, 2], [-146, -19, 2], [-150, -40, 3], [-162, -43, 4], [-176, -36, 6], [-186, -26, 3]], 1.4, { bevel: 0.5, z: s * 17.6 }));
+    qdSocket(k, -174, -28, s * 18.2, s);
+    // двусторонние кнопки магазина в защитном ободке
+    k.add(M, G.extrudeZ(G.shape(G.circle(-80, -27, 7.6, 24), [G.circle(-80, -27, 5.8, 20)]), 1.8, { bevel: 0.5, z: s * 18.2 }));
+    k.add('poly', G.cylZ(5.2, 0, 2.2, { c: 0.8, seg: 20 }), { p: [-80, -27, s > 0 ? 17.4 : -19.6] });
+    k.add('polyFdeDark', G.T(G.cylZ(3.4, 0, 0.3, { seg: 16, c: 0 }), { p: [-80, -27, s * 19.6], s: [1, 1, s] }));
+    // бобышка переводчика и метки положений (S — 0°, 1 — вверх, F — назад)
+    k.add('polyFdeDark', G.T(G.cylZ(8.6, 0, 0.8, { c: 0.3, seg: 28 }), { p: [-122, -24, s * 17.3], s: [1, 1, s] }));
+    for (const [a, n] of [[0, 1], [90, 2], [180, 3]]) {
+      const ar = a * Math.PI / 180;
+      for (let j = 0; j < n; j++) k.add('paintWhite', G.T(G.box(0.7, 2.6, 0.2, { bevel: 0.05 }), { p: [-122 + Math.cos(ar) * 11 + (j - (n - 1) / 2) * 1.3 * Math.sin(ar), -24 + Math.sin(ar) * 11, s * 17.6], r: [0, 0, a - 90] }));
+    }
   }
-  // спусковая скоба
-  const tg = G.shape([[-70, -38], [-72, -52, 4], [-82, -58, 6], [-116, -56, 8], [-126, -44, 4], [-126, -38]],
+  // спусковая скоба — увеличенная, под перчатку
+  const tg = G.shape([[-68, -38], [-71, -52, 4], [-82, -59, 7], [-116, -57, 8], [-127, -44, 4], [-127, -38]],
     [[[-78, -40], [-78, -49, 3], [-85, -52, 4], [-112, -51, 5], [-119, -43, 3], [-119, -40]]]);
-  k.add(M, G.extrudeZ(tg, 12, { bevel: 1.6 }));
-  // кнопки магазина (с обеих сторон), затворная задержка слева
-  for (const s of [-1, 1]) {
-    k.add('poly', G.cylZ(5, 0, 2.4, { c: 0.8, seg: 18 }), { p: [-80, -26, s > 0 ? 17.5 : -19.9] });
-    k.add(M, G.extrudeZ([[-90, -18], [-72, -18], [-72, -34, 3], [-90, -34, 3]], 2, { bevel: 0.8, z: s * 17.8 }));
+  k.add(M, G.extrudeZ(tg, 12, { bevel: 2, bevelSeg: 3 }));
+  // затворная задержка слева — лопатка над скобой
+  k.add('poly', G.extrudeZ([[-72, -18, 1], [-52, -18, 2], [-49, -23, 2], [-56, -30, 3], [-64, -28, 2], [-72, -23, 1]], 2.4, { bevel: 0.7, z: -18.8 }));
+  for (let i = 0; i < 3; i++) k.add('poly', G.T(G.box(0.8, 7, 1), { p: [-60 + i * 2.6, -23.5, -20.2] }));
+  pinHead(k, -68, -21, -17.8, -1, 2.6, 1.6, 'steelPark');
+  // оси УСМ, передний и задний штифты разборки (головки слева)
+  for (const [x, y, r] of [[-95, -30, 2.4], [-112, -30, 2.4], [-172, -21, 3.4], [8, -21, 3.4]]) {
+    k.add('steel', G.pin(r * 0.75, 36.4), { p: [x, y, 0] });
+    pinHead(k, x, y, -18.2, -1, r, 1.1);
   }
-  k.add('poly', G.extrudeZ([[-66, -12, 1], [-50, -12, 1], [-50, -19, 2], [-62, -24, 2], [-66, -22]], 2.6, { bevel: 0.6, z: -18.6 }));
-  // оси (стальные) и задняя ось-фиксатор
-  for (const [x, y] of [[-95, -30], [-112, -30], [-172, -22]]) k.add('steel', G.pin(2.6, 36), { p: [x, y, 0] });
-  // спусковой крючок и двусторонний переводчик
+  // спусковой крючок: изогнутая лопасть с плоской гранью
   const tk = ctx.kit();
-  tk.add('steel', G.extrudeZ([[-3, 4], [3, 4], [3, -6, 2], [0, -16, 4], [-6, -22, 2], [-7.5, -20], [-3, -9, 3]], 6, { bevel: 1 }));
+  tk.add('steel', G.extrudeZ([[-3, 4], [3, 4], [3, -5, 2], [1.6, -12, 6], [-2.2, -19, 4], [-6.5, -22.5, 1.5], [-7.6, -21], [-4.8, -16, 5], [-3.2, -8, 3]], 6, { bevel: 1.1, bevelSeg: 3 }));
   nodes.trigger = G.node('trigger', [tk.build()], { p: [-90, -34, 0] });
+  // двусторонний переводчик: левый рычаг длиннее, с упором под палец
   const sk = ctx.kit();
-  sk.add('steel', G.extrudeZ([[0, -4.5, 2], [22, -3, 3], [23, 3, 3], [0, 4.5, 2]], 3, { bevel: 0.8, z: -19.2 }));
-  sk.add('steel', G.extrudeZ([[0, -4.5, 2], [18, -3, 3], [19, 3, 3], [0, 4.5, 2]], 3, { bevel: 0.8, z: 19.2 }));
-  sk.add('steel', G.cylZ(5.6, -18.5, 18.5, { c: 0.6, seg: 20 }));
+  sk.add('steelPark', G.extrudeZ([[0, -4.5, 2], [17, -3.2, 2], [23, -4.2, 2], [24, 3.6, 2.5], [16, 3, 2], [0, 4.5, 2]], 3, { bevel: 0.9, z: -19.4 }));
+  sk.add('steelPark', G.extrudeZ([[0, -4.5, 2], [18, -3, 3], [19, 3, 3], [0, 4.5, 2]], 3, { bevel: 0.9, z: 19.4 }));
+  for (const s of [-1, 1]) {
+    sk.add('steelPark', G.T(G.cylZ(5.4, 0, 1.2, { c: 0.5, seg: 22 }), { p: [0, 0, s * 20.3], s: [1, 1, s] }));
+    sk.add('lensBlack', G.T(G.cylZ(1.8, 0, 0.3, { c: 0, seg: 12 }), { p: [0, 0, s * 21.4], s: [1, 1, s] }));
+  }
+  sk.add('steel', G.cylZ(5, -18.5, 18.5, { c: 0.6, seg: 20 }));
+  for (let i = 0; i < 3; i++) sk.add('steelPark', G.T(G.box(0.9, 6, 1), { p: [18 + i * 2.2, 0, -21.3] }));
   nodes.selector = G.node('selector', [sk.build()], { p: [-122, -24, 0] });
   return [nodes.trigger, nodes.selector];
 }
 
 function barrel(ctx, k) {
-  k.add('steel', G.latheX([[UP_FRONT - 30, 0], [UP_FRONT - 30, 13.6], [UP_FRONT + 2, 13.6], [UP_FRONT + 4, 11.2], [BARREL - 14, 10.4], [BARREL - 13, 7.9], [BARREL, 7.8], [BARREL, 3], [BARREL - 6, 3], [BARREL - 6, 0]], { seg: 32 }));
-  // газовый блок с двухпозиционным регулятором и поршневой трубкой
-  k.add('steel', G.extrudeX(G.shape([[-15, -13, 5], [15, -13, 5], [15, 32, 5], [-15, 32, 5]], [G.circle(0, 0, 10.6, 24)]), UP_FRONT + 4, UP_FRONT + 36, { bevel: 1.6 }));
-  k.add('steel', G.T(G.cylX(8.5, UP_FRONT + 36, UP_FRONT + 44, { c: 1, seg: 24 }), { p: [0, 20, 0] }));
-  k.add('steel', G.T(G.cylZ(4.5, -20, -15, { seg: 16 }), { p: [UP_FRONT + 26, 20, 0] }));
-  k.add('steel', G.T(G.box(3, 12, 2), { p: [UP_FRONT + 40, 20, -8.8] }));
-  k.add('steel', G.T(G.cylZ(2.6, -16, 16, { seg: 14 }), { p: [UP_FRONT + 14, -6, 0] }));
+  const GB = UP_FRONT + 2;
+  // ствол: утолщение у коробки, ступень под газовый блок, конус к дулу, резьба 5/8x24
+  k.add('steelPark', G.latheX([[UP_FRONT - 40, 0], [UP_FRONT - 40, 13.6], [UP_FRONT + 1, 13.6], [UP_FRONT + 1.6, 11.4], [GB + 31, 11.4], [GB + 32, 10.6], [BARREL - 70, 10.2], [BARREL - 15, 9.5], [BARREL - 14, 9.5], [BARREL - 13.4, 7.6], [BARREL, 7.6], [BARREL, 3.9], [BARREL - 8, 3.9], [BARREL - 8, 0]], { seg: 36 }));
+  k.add('steelPark', G.ringGrooves(7.95, BARREL - 13, BARREL - 0.3, 16, 0.4, { seg: 24 }));
+  k.add('lensBlack', G.cylX(3.95, BARREL - 7.9, BARREL - 7.7, { c: 0, seg: 16 }));
+  // газовый блок: охват ствола снизу, башня к газовой трубке сверху
+  const gb = [];
+  for (let i = 0; i <= 12; i++) { const a = (-160 + i * (140 / 12)) * Math.PI / 180; gb.push([Math.cos(a) * 14.2, Math.sin(a) * 14.2]); }
+  gb.push([13.4, 3, 1.5], [11.4, 19, 3], [8.4, 26, 4], [-8.4, 26, 4], [-11.4, 19, 3], [-13.4, 3, 1.5]);
+  k.add('steel', G.extrudeX(G.shape(gb, [G.circle(0, 0, 11.4, 28)]), GB, GB + 30, { bevel: 1.6, bevelSeg: 3 }));
+  // поперечные штифты газового блока и винт сверху
+  for (const x of [GB + 8, GB + 22]) {
+    k.add('steelPark', G.pin(2.2, 27.6), { p: [x, -7, 0] });
+    for (const s of [-1, 1]) k.add('lensBlack', G.T(G.cylZ(0.9, 0, 0.2, { c: 0, seg: 10 }), { p: [x, -7, s * 13.8], s: [1, 1, s] }));
+  }
+  k.add('steelPark', G.T(G.cylX(3, 0, 1.4, { c: 0.4, seg: 6 }), { r: [0, 0, 90], p: [GB + 15, 26, 0] }));
+  // двухпозиционный регулятор газа: накатанный барабан, флажок слева, торцевая пробка
+  k.add('steel', G.T(G.cylX(8.6, GB + 30, GB + 40, { c: 1, seg: 28 }), { p: [0, 17, 0] }));
+  k.add('steel', G.T(G.flutesX(8.2, GB + 31.5, GB + 38.5, 18, 1.2, 0.6), { p: [0, 17, 0] }));
+  k.add('steelPark', G.T(G.cylX(5.2, GB + 40, GB + 43, { c: 0.8, seg: 20 }), { p: [0, 17, 0] }));
+  k.add('lensBlack', G.T(G.box(0.2, 1.4, 7), { p: [GB + 43.05, 17, 0] }));
+  k.add('steel', G.extrudeZ([[GB + 32, 13, 1], [GB + 39, 13, 1], [GB + 40, 22, 2], [GB + 33, 23, 2]], 2.2, { bevel: 0.6, z: -9.6 }));
+  k.add('paintWhite', G.T(G.box(0.5, 2.4, 0.2), { p: [GB + 26, 20, -11.8] }));
 }
 
 function carrier(ctx) {
   const k = ctx.kit();
   k.add('steelPark', G.latheX([[-150, 0], [-150, 12.4], [-6, 12.4], [-5, 9], [-5, 0]], { seg: 28 }));
+  // продольные канавки рамы (видны в окне)
+  for (const a of [70, 110]) k.add('lensBlack', G.T(G.box(120, 1, 0.8), { p: [-80, Math.cos(a * Math.PI / 180) * 12.45, Math.sin(a * Math.PI / 180) * 12.45], r: [-(a - 90), 0, 0] }));
   k.add('steelWorn', G.latheX([[-8, 0], [-8, 9.2], [4, 9.2], [4.6, 8.4], [4.6, 0]], { seg: 20 }));
   for (let i = 0; i < 7; i++) k.add('steelWorn', G.T(G.box(4, 3, 4), { p: [3, 10, 0], r: [i * 51.4, 0, 0] }));
+  // выбрасыватель и ось кулачка затвора
   k.add('steel', G.extrudeZ([[-20, 7], [2, 7], [2, 10.5], [-20, 10.5]], 3, { bevel: 0.5, z: 8.4 }));
+  k.add('steelWorn', G.T(G.cylZ(2.2, 0, 1.4, { seg: 12 }), { p: [-30, 2, 11.8] }));
   // ползун рукояти заряжания в пазу коробки (оба борта)
-  k.add('steelPark', G.extrudeZ([[-4, 3.5], [96, 3.5], [96, 9], [-4, 9]], 36, { bevel: 0.8 }));
+  k.add('steelPark', G.extrudeZ([[-4, 3.8], [96, 3.8], [96, 9.2], [-4, 9.2]], 36, { bevel: 0.8 }));
   const node = G.node('carrier', [k.build()]);
   node.add(ctx.mount({ id: 'charger', type: 'charger', p: [74, 6, 0] }));
   return node;
@@ -147,7 +268,7 @@ function build(ctx) {
   return {
     root, nodes,
     anim: { carrierTravel: 128, selector: { safe: 0, semi: 90, auto: 180 } },
-    eject: { p: [-36, 2, 20], dir: [0.3, 0.35, 1] },
+    eject: { p: [-36, -5, 18], dir: [0.3, 0.35, 1] },
     muzzle: [BARREL, 0, 0],
     eyeX: -300,
     focus: { center: [30, -20, 0], size: 1000 },
@@ -193,16 +314,18 @@ function scarRear(ctx) {
 function scarFH(ctx) {
   const k = ctx.kit();
   // пламегаситель SCAR-H: три открытых зубца, лыски под ключ
-  k.add('steel', G.latheX([[0, 0], [0, 11], [1, 11.6], [22, 11.6], [23, 11], [23, 5.6], [0, 5.6]], { seg: 32 }));
+  // корпус накручен на резьбу до буртика ствола
+  k.add('steel', G.latheX([[-13.4, 0], [-13.4, 10.4], [-12.4, 11.4], [22, 11.6], [23, 11], [23, 5.6], [0, 5.6], [0, 0]], { seg: 32 }));
+  k.add('lensBlack', G.cylX(5.5, 0.2, 0.4, { c: 0, seg: 16 }));
   for (let i = 0; i < 3; i++) k.add('steel', G.T(G.latheX([[21, 7.4], [21, 11.4], [52, 11.4], [53.5, 10.2], [53.5, 7.4]], { seg: 10, arc: 78, a0: -39 }), { r: [i * 120, 0, 0] }));
-  k.add('steel', G.flutesX(11.6, 3, 16, 2, 7, 0.5, { a0: 90 }));
+  k.add('steel', G.flutesX(11.6, -9, 6, 2, 7, 0.5, { a0: 90 }));
   return { root: k.build('scar_fh'), muzzle: { x: 53.5, kind: 'fh', flash: 0.3 } };
 }
 
 function cap(ctx) {
   const k = ctx.kit();
-  k.add('steel', G.latheX([[0, 0], [0, 10], [14, 10], [16, 8.6], [16, 0]], { seg: 28 }));
-  k.add('steel', G.flutesX(10, 2, 14, 14, 1.2, 0.5));
+  k.add('steel', G.latheX([[-13.4, 0], [-13.4, 9.2], [-12.4, 10], [14, 10], [16, 8.6], [16, 0]], { seg: 28 }));
+  k.add('steel', G.flutesX(10, -10, 14, 14, 1.2, 0.5));
   return { root: k.build('cap'), muzzle: { x: 16, kind: 'bare', flash: 1 } };
 }
 
@@ -228,7 +351,10 @@ function scarStock(ctx, o = {}) {
   f.add('rubber', G.extrudeZ([[-L + 18, 26, 3], [-L, 25, 5], [-L - 1, -114, 6], [-L + 18, -114, 3]], 40, { bevel: 4 }));
   for (let i = 0; i < 11; i++) f.add('rubber', G.T(G.box(2, 3, 36), { p: [-L - 1, 16 - i * 12, 0] }));
   // антабки QD
-  for (const s of [-1, 1]) f.add('steel', G.cylZ(5.5, 0, 3, { seg: 18 }), { p: [-L + 44, -90, s > 0 ? 15 : -18] });
+  for (const s of [-1, 1]) qdSocket(f, -L + 44, -90, s * 15, s);
+  // рычаг фиксации телескопа снизу и кнопка складывания на шарнире
+  f.add('poly', G.extrudeZ([[-112, -22, 1], [-86, -21, 2], [-84, -24, 2], [-108, -27, 2]], 14, { bevel: 1 }));
+  k.add('steel', G.T(G.cylZ(3.2, 0, 1.4, { c: 0.4, seg: 16 }), { p: [-8, 8, -19.2], s: [1, 1, -1] }));
   if (o.prs) {
     // SSR/PRS: регулировочные колёса щеки и затыльника, моноопора
     f.add('alu', G.T(ctx.C.knob(10, 8, 24), { r: [0, -90, 0], p: [-L + 60, 30, 16] }));
@@ -263,7 +389,15 @@ function sr25(ctx, o) {
   for (let i = 0; i <= n; i++) { const y = top - (i / n) * (top + len); pts.push([-D / 2 + off(y), y, 0]); }
   for (let i = n; i >= 0; i--) { const y = top - (i / n) * (top + len); pts.push([D / 2 + off(y), y, 0]); }
   k.add(o.mat, G.extrudeZ(pts, W, { bevel: o.bevel ?? 1.2 }));
-  if (o.ribs) for (const s of [-1, 1]) k.add(o.mat, G.T(G.box(D - 18, len - 30, 1, { bevel: 0.5 }), { p: [off(-len / 2), -len / 2 - 4, s * (W / 2 + 0.2)] }));
+  if (o.ribs) {
+    for (const s of [-1, 1]) {
+      // штампованная панель жёсткости и поперечные выштамповки у подавателя
+      k.add(o.mat, G.T(G.extrudeZ(G.rrect(0, 0, D - 20, len - 34, 7), 1.4, { bevel: 0.6 }), { p: [off(-len / 2), -len / 2 - 2, s * (W / 2 + 0.2)] }));
+      for (let i = 0; i < 3; i++) { const y = -len + 26 + i * 7; k.add(o.mat, G.T(G.box(D - 36, 1.8, 1.2, { bevel: 0.5 }), { p: [off(y), y, s * (W / 2 + 0.9)] })); }
+      // контрольные отверстия счёта патронов
+      for (let i = 0; i < 4; i++) { const y = 26 - i * 22; k.add('lensBlack', G.T(G.cylZ(1.6, 0, 0.3, { c: 0, seg: 12 }), { p: [D / 2 - 10 + off(y), y, s * (W / 2 + 0.05)], s: [1, 1, s] })); }
+    }
+  }
   if (o.texture) for (let i = 0; i < 6; i++) for (const s of [-1, 1]) k.add(o.mat, G.T(G.box(D - 14, 1.6, 1), { p: [off(-30 - i * 6), -30 - i * 6, s * (W / 2 + 0.2)] }));
   k.add(o.plate || o.mat, G.T(G.box(D + 8, 7, W + 4, { bevel: 2 }), { p: [off(-len) + 3, -len - 2, 0] }));
   k.add('polyGrey', G.box(D - 10, 3, W - 5), { p: [-2, top - 4, 0] });

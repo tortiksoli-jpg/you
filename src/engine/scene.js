@@ -3,6 +3,11 @@
 import * as THREE from 'three';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 export const GUN_Y = 1.42;
 // Размеры тира (м): задняя стена, пулеулавливатель, полуширина, потолок, огневой рубеж.
@@ -148,6 +153,7 @@ function envScene(night) {
   if (!night) {
     for (const x of [4, 8, 12, 16, 20, 24]) plane(0.25, 9, 0xfff3e2, 9, x, RANGE.ceil - GUN_Y - 0.05, 0);
     for (const x of [-2.6, -0.9]) for (const z of [-2.4, 0, 2.4]) plane(1.2, 0.6, 0xfff3e2, 8, x, RANGE.ceil - GUN_Y - 0.06, z);
+    for (let x = 3; x < 30; x += 4) plane(1.5, 9, 0xdfeaf7, 5, x + 1.65, RANGE.ceil - GUN_Y + 0.3, 0);
   } else {
     plane(0.5, 0.2, 0x40ff80, 2.5, RANGE.back + 0.05, 2.3 - GUN_Y, -3, 0).rotation.y = Math.PI / 2;
   }
@@ -173,7 +179,7 @@ export function createScene(canvasHost) {
   const envDay = pmrem.fromScene(envScene(false), 0.035).texture;
   const envNight = pmrem.fromScene(envScene(true), 0.035).texture;
   scene.environment = envDay;
-  scene.environmentIntensity = 0.8;
+  scene.environmentIntensity = 1.05;
   // лёгкая дымка: в закрытом тире всегда висит пороховой дым и пыль
   scene.fog = new THREE.FogExp2(0x77756f, 0.0045);
 
@@ -182,12 +188,13 @@ export function createScene(canvasHost) {
   const hemi = new THREE.HemisphereLight(0xfff4e6, 0x5d5a52, 0.5);
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff2e0, 2.1); // панель над стрелком (имя — для app.js)
-  sun.position.set(-0.9, 5.5, 0.9);
+  // под потолком: потолок отбрасывает тень (для солнечных пятен) и не должен её заслонять
+  sun.position.set(-0.7, RANGE.ceil - 0.15, 0.7);
   sun.target.position.set(0, GUN_Y, 0);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera;
-  sc.left = -1.1; sc.right = 1.1; sc.top = 1.1; sc.bottom = -1.1; sc.near = 1; sc.far = 12;
+  sc.left = -1.1; sc.right = 1.1; sc.top = 1.1; sc.bottom = -1.1; sc.near = 0.2; sc.far = 6;
   sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.012;
   scene.add(sun, sun.target);
   const area = new THREE.RectAreaLight(0xfff3e2, 5.5, 1.2, 0.6);
@@ -198,7 +205,7 @@ export function createScene(canvasHost) {
   down.position.set(-10, 20, 3);
   down.target.position.set(40, 0, 0);
   scene.add(down, down.target);
-  const fill = new THREE.DirectionalLight(0xfff4e6, 0.35);
+  const fill = new THREE.DirectionalLight(0xfff4e6, 0.7);
   fill.position.set(0.5, 0.6, 3);
   fill.target.position.set(0, GUN_Y, 0);
   scene.add(fill, fill.target);
@@ -208,10 +215,60 @@ export function createScene(canvasHost) {
 
   const range = buildRange(scene);
 
+  // Солнце (ночью — луна) через зенитные фонари: тени от переплётов и козырьков
+  // рисуют на полу и стенах полосы света; лучи в пыльном воздухе — объёмные призмы.
+  const sunDir = new THREE.Vector3(0.22, -1, -0.62).normalize();
+  // тени — на весь зал: вне карты теней солнце светило бы сквозь потолок
+  const sky = new THREE.DirectionalLight(0xfff0d8, 7);
+  sky.position.set(49, 0, 0).addScaledVector(sunDir, -30);
+  sky.target.position.set(49, 0, 0);
+  sky.castShadow = true;
+  sky.shadow.mapSize.set(4096, 4096);
+  Object.assign(sky.shadow.camera, { left: -76, right: 76, top: 76, bottom: -76, near: 1, far: 70 });
+  sky.shadow.bias = -0.0006; sky.shadow.normalBias = 0.03;
+  scene.add(sky, sky.target);
+  const shaftU = { uCol: { value: new THREE.Color(0xfff0d8).multiplyScalar(0.05) }, uTime: { value: 0 } };
+  const shaftM = new THREE.ShaderMaterial({
+    uniforms: shaftU, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: 'varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: `uniform vec3 uCol; uniform float uTime; varying vec3 vW;
+      float h3(vec3 p){ p = fract(p*0.3183099+0.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+      float n3(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.-2.*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),f.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),f.x),f.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),f.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),f.x),f.y),f.z); }
+      void main(){
+        float h = clamp(vW.y / ${RANGE.ceil.toFixed(1)}, 0., 1.);
+        float d = 0.55 + 0.9 * n3(vW * 1.7 + vec3(0., uTime * 0.03, 0.));
+        vec3 c = uCol * d * (0.35 + 0.65 * h);
+        gl_FragColor = vec4(c, 1.);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  });
+  {
+    const G2 = [];
+    const t = RANGE.ceil / -sunDir.y;
+    for (const [x0, x1, z0, z1] of range.skylights) {
+      const top = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]].map(([x, z]) => new THREE.Vector3(x, RANGE.ceil, z));
+      const bot = top.map((v) => v.clone().addScaledVector(sunDir, t));
+      const pos = [];
+      for (let i = 0; i < 4; i++) {
+        const a = top[i], b = top[(i + 1) % 4], c = bot[(i + 1) % 4], d = bot[i];
+        pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, a.x, a.y, a.z, c.x, c.y, c.z, d.x, d.y, d.z);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      G2.push(g);
+    }
+    const shafts = new THREE.Mesh(mergeGeometries(G2), shaftM);
+    shafts.renderOrder = 1; shafts.userData.noAO = true; shafts.frustumCulled = false;
+    scene.add(shafts);
+  }
+
   // Ночь: светильники тира выключены, остаются табло «ВЫХОД» и полоска света
   // из-под двери. Число источников не меняется — шейдеры не перекомпилируются.
-  const DAY = { hemi: 0.5, sun: 2.1, area: 5.5, down: 1.3, fill: 0.35, env: 0.8, fog: 0x77756f };
-  const NIGHT = { hemi: 0.004, sun: 0, area: 0, down: 0, fill: 0.0015, env: 1, fog: 0x040405 };
+  const DAY = { hemi: 0.5, sun: 2.1, area: 5.5, down: 0.9, fill: 0.7, env: 1.05, fog: 0x77756f, sky: 7, shaft: 0.04 };
+  const NIGHT = { hemi: 0.005, sun: 0, area: 0, down: 0, fill: 0.0015, env: 1, fog: 0x040405, sky: 0.03, shaft: 0.002 };
   let night = false;
   const setNight = (on) => {
     night = !!on;
@@ -222,18 +279,61 @@ export function createScene(canvasHost) {
     scene.environment = night ? envNight : envDay;
     scene.environmentIntensity = P.env;
     scene.fog.color.set(P.fog);
+    sky.intensity = P.sky;
+    sky.color.set(night ? 0x9db4e0 : 0xfff0d8);
+    shaftU.uCol.value.copy(sky.color).multiplyScalar(P.shaft);
     range.setNight(night);
   };
   // Средняя освещённость зала (ед.) — от неё отталкивается адаптация «глаза».
-  const ambient = () => (night ? 0.004 : 2.2);
+  const ambient = () => (night ? 0.004 : 2.6);
+
+  // Постобработка (ПК): затенение в щелях и углах (GTAO), свечение ярких источников
+  // (линза фонаря, точка лазера, вспышка), тональная компрессия и экспозиция — в конце.
+  // Цель рендера со стенсилом: сетки прицелов рисуются по маске линзы.
+  const rt = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), { type: THREE.HalfFloatType, stencilBuffer: true, depthBuffer: true, samples: 4 });
+  const composer = new EffectComposer(renderer, rt);
+  composer.addPass(new RenderPass(scene, camera));
+  const gtao = new GTAOPass(scene, camera, innerWidth, innerHeight);
+  // в карту нормалей для AO попадают только непрозрачные сетки
+  gtao.overrideVisibility = function () {
+    const cache = this._visibilityCache;
+    this.scene.traverse((o) => {
+      cache.set(o, o.visible);
+      const m = o.material;
+      if (o.isPoints || o.isLine || o.isSprite || o.userData.noAO || o.userData.reticle || (m && (m.transparent || m.isShaderMaterial))) o.visible = false;
+    });
+  };
+  gtao.updateGtaoMaterial({ radius: 0.07, distanceExponent: 1.4, thickness: 1.2, scale: 1.1, samples: 16, distanceFallOff: 1, screenSpaceRadius: false });
+  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+  gtao.blendIntensity = 0.85;
+  composer.addPass(gtao);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.25, 0.45, 1.2);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+  const post = { composer, gtao, bloom };
+  // Порог свечения — в единицах сцены до экспозиции: ночью глаз адаптирован,
+  // поэтому светятся и не очень яркие (для дня) источники.
+  const render = () => {
+    shaftU.uTime.value = performance.now() / 1000;
+    const e = renderer.toneMappingExposure;
+    bloom.threshold = 1.15 / e;
+    bloom.strength = night ? 0.55 : 0.22;
+    gtao.blendIntensity = night ? 0.4 : 0.85;
+    composer.render();
+  };
+  const resize = () => {
+    composer.setPixelRatio(renderer.getPixelRatio());
+    composer.setSize(innerWidth, innerHeight);
+  };
 
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
+    resize();
   });
 
-  return { renderer, scene, camera, sun, range, env: envDay, setNight, ambient, get night() { return night; } };
+  return { renderer, scene, camera, sun, range, env: envDay, setNight, ambient, render, resize, post, get night() { return night; } };
 }
 
 /* ---------------------------------------------------------------- тир */
@@ -299,16 +399,47 @@ function buildRange(scene) {
   gap.position.set(back + 0.065, 0.006, -3); gap.rotation.y = Math.PI / 2; grp.add(gap);
 
   // потолок и защитные козырьки (фанера по стали под 30°)
-  const ceilMesh = new THREE.Mesh(new THREE.PlaneGeometry(L, halfW * 2), new THREE.MeshStandardMaterial({ color: 0x1f2022, roughness: 0.95 }));
-  ceilMesh.rotation.x = Math.PI / 2; ceilMesh.position.set(cx, ceil, 0);
+  // Зенитные фонари между козырьками (первые 30 м): днём — солнечные пятна и
+  // пыльные лучи, ночью — слабый лунный свет. Потолок — плоскость с проёмами.
+  const skylights = [];
+  for (let x = 3; x < 30; x += 4) skylights.push([x + 0.9, x + 2.4, -4.5, 4.5]);
+  const cs = new THREE.Shape();
+  cs.moveTo(back, -halfW); cs.lineTo(end, -halfW); cs.lineTo(end, halfW); cs.lineTo(back, halfW); cs.closePath();
+  for (const [x0, x1, z0, z1] of skylights) {
+    const h = new THREE.Path();
+    h.moveTo(x0, z0); h.lineTo(x0, z1); h.lineTo(x1, z1); h.lineTo(x1, z0); h.closePath();
+    cs.holes.push(h);
+  }
+  const ceilMesh = new THREE.Mesh(new THREE.ShapeGeometry(cs), new THREE.MeshStandardMaterial({ color: 0x1f2022, roughness: 0.95 }));
+  ceilMesh.rotation.x = Math.PI / 2; ceilMesh.position.y = ceil;
+  ceilMesh.castShadow = true;
   add(ceilMesh, 'concrete');
+  const curbM = new THREE.MeshStandardMaterial({ color: 0x8d8f91, roughness: 0.6, metalness: 0.4 });
+  const curbG = [], paneG = [];
+  for (const [x0, x1, z0, z1] of skylights) {
+    const H = 0.45, xm = (x0 + x1) / 2, zm = (z0 + z1) / 2;
+    curbG.push(new THREE.BoxGeometry(x1 - x0 + 0.1, H, 0.05).translate(xm, ceil + H / 2, z0 - 0.025));
+    curbG.push(new THREE.BoxGeometry(x1 - x0 + 0.1, H, 0.05).translate(xm, ceil + H / 2, z1 + 0.025));
+    curbG.push(new THREE.BoxGeometry(0.05, H, z1 - z0).translate(x0 - 0.025, ceil + H / 2, zm));
+    curbG.push(new THREE.BoxGeometry(0.05, H, z1 - z0).translate(x1 + 0.025, ceil + H / 2, zm));
+    // переплёты: поперечные и продольный
+    for (let i = 1; i < 6; i++) curbG.push(new THREE.BoxGeometry(x1 - x0, 0.06, 0.05).translate(xm, ceil + H - 0.03, z0 + (z1 - z0) * i / 6));
+    curbG.push(new THREE.BoxGeometry(0.05, 0.06, z1 - z0).translate(xm, ceil + H - 0.03, zm));
+    paneG.push(new THREE.PlaneGeometry(x1 - x0, z1 - z0).rotateX(Math.PI / 2).translate(xm, ceil + H, zm));
+  }
+  const curbs = new THREE.Mesh(mergeGeometries(curbG), curbM);
+  curbs.castShadow = true; grp.add(curbs);
+  const skyM = new THREE.MeshBasicMaterial({ color: 0xdfeaf7 });
+  skyM.color.multiplyScalar(5);
+  grp.add(new THREE.Mesh(mergeGeometries(paneG), skyM));
   const wt = woodTex(); wt.repeat.set(6, 1);
   const bafG = [], fixtures = [];
   for (let x = 3; x < end - 4; x += x < 30 ? 4 : 8) {
     bafG.push(new THREE.BoxGeometry(0.03, 1.0, halfW * 2 - 0.1).rotateZ(-0.52).translate(x, ceil - 0.5, 0));
-    fixtures.push(x + (x < 30 ? 2 : 4));
+    fixtures.push(x + (x < 30 ? 3.1 : 4));
   }
-  const baffles = new THREE.Mesh(mergeGeometries(bafG), new THREE.MeshStandardMaterial({ map: wt, roughness: 0.85 }));
+  const baffles = new THREE.Mesh(mergeGeometries(bafG), new THREE.MeshStandardMaterial({ map: wt, color: 0x8a8a8a, roughness: 0.85 }));
+  baffles.castShadow = true;
   add(baffles, 'wood');
   // светильники: линии поперёк зала между козырьками + панели над рубежом
   const fixM = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xfff3e2, emissiveIntensity: 2.2, roughness: 0.4 });
@@ -334,6 +465,8 @@ function buildRange(scene) {
       p.position.set(line - 0.85, 1.05, z);
       // плоскость смотрит в свою кабинку (к оси z = 0 для своих перегородок)
       p.rotation.y = s > 0 ? Math.PI : 0;
+      // тень оружия на перегородку не падает, а скользящий свет панели давал на ней полосу
+      p.userData.noShadow = true;
       grp.add(p);
     }
   }
@@ -438,7 +571,7 @@ function buildRange(scene) {
   addTarget(line + 100, -1.0, 'ipsc', '100 м');
   addTarget(line + 100, 1.8, 'plate');
 
-  grp.traverse((o) => { if (o.isMesh) o.receiveShadow = true; });
+  grp.traverse((o) => { if (o.isMesh) o.receiveShadow = !o.userData.noShadow; });
 
   const update = (dt) => {
     for (const t of targets) {
@@ -453,9 +586,10 @@ function buildRange(scene) {
   // высота поверхности под точкой: гильзы и магазин падают на стойку или пол
   const floorAt = (x, z) => (x > line - 0.47 && x < line && Math.abs(z) < halfW - 0.1 ? 0.95 : 0);
   const setNight = (on) => {
+    skyM.color.set(on ? 0x0d1a30 : 0xdfeaf7).multiplyScalar(on ? 0.12 : 5);
     fixM.emissiveIntensity = on ? 0 : 2.2;
     gapM.color.set(0xffe2b0).multiplyScalar(on ? 0.08 : 0.3);
     exitM.emissiveIntensity = on ? 0.35 : 0.9;
   };
-  return { group: grp, targets, hitables, update, hit, floorAt, setNight, ground: floor };
+  return { group: grp, targets, hitables, update, hit, floorAt, setNight, ground: floor, skylights };
 }

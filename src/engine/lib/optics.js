@@ -255,6 +255,62 @@ function rmrOffset(ctx) {
 
 /* ------------------------------------ AN/PVS-14 на откидном кронштейне */
 
+// Кронштейн 45° с произвольным мини-коллиматором: body(k) строит корпус в системе
+// наклонной площадки (начало — центр нижней плоскости) и возвращает { A, glass, x0, x1, reticle }.
+function cantOptic(ctx, name, body) {
+  const k = ctx.kit(), m = ctx.kit();
+  k.add('alu', clampBody(-13, 13, 5, { w: 24 }));
+  k.add('steel', crossBolt(0));
+  k.add('alu', G.extrudeX([[-12, 3, 1], [12, 3, 1], [31, 14, 3], [27, 22, 3], [6, 12, 3], [-12, 8, 2]], -13, 13, { bevel: 1.2 }));
+  for (const x of [-7, 7]) k.add('steel', G.T(G.cylX(1.9, 0, 1.4, { seg: 6 }).rotateY(Math.PI / 2), { p: [x, 17, 24] }));
+  m.add('alu', G.extrudeX(G.rrect(0, -1.5, 28, 5, 1.5), -24, 25, { bevel: 0.8 }));
+  const b = body(ctx, m);
+  const cant = G.node(name + 'Cant', [m.build(), b.glass]);
+  cant.position.set(0, 16.5, 22);
+  cant.rotation.x = Math.PI / 4;
+  return {
+    root: G.node(name, [k.build(), cant]),
+    sight: { node: cant, y: b.A, z: 0, x0: b.x0, x1: b.x1, r: 9, mag: 1, reticle: b.reticle || 'dot', lens: b.glass },
+  };
+}
+
+// Leupold DeltaPoint Pro: высокое окно с наклонённым верхом, металлический козырёк,
+// кнопка сверху сзади, батарея сверху под прицелом.
+function dppBody(ctx, k) {
+  const A = 17;
+  k.add('alu', G.extrudeX(G.rrect(0, 4, 26, 8, 2), -24, 22, { bevel: 1.2 }));
+  k.add('alu', G.extrudeZ([[-24, 7], [-8, 7], [-8, 11], [-14, 13.5, 2], [-24, 12.5, 2]], 24, { bevel: 1.2 }));
+  const hood = G.shape([[-13, 7], [13, 7], [13, 22, 3], [8, 29, 5], [-8, 29, 5], [-13, 22, 3]], [[[-10, 8.6], [10, 8.6], [10, 21.5, 2], [6.5, 26.5, 4], [-6.5, 26.5, 4], [-10, 21.5, 2]]]);
+  k.add('alu', G.extrudeX(hood, 0, 17, { bevel: 1 }));
+  k.add('steel', G.T(G.box(10, 2.4, 20, { bevel: 0.6 }), { p: [8, 28.6, 0] }));
+  k.add('rubber', G.T(G.cylY(3, 11, 13.6, { seg: 16, c: 0.6 }), { p: [-18, 0, 0] }));
+  for (const s of [-1, 1]) k.add('steel', G.T(G.cylZ(2.2, 12.6, 13.6, { seg: 12 }), { p: [-4, 11, s > 0 ? 0 : -26.2] }));
+  const glass = lens(ctx, G.extrudeX(G.shape([[-9.6, 9], [9.6, 9], [9.6, 21, 2], [6, 26, 4], [-6, 26, 4], [-9.6, 21, 2]]), 11, 12, { bevel: 0.2 }), 'glassAmber');
+  return { A, glass, x0: -24, x1: 17, reticle: 'dot' };
+}
+
+// Aimpoint ACRO P-2: закрытый корпус (излучатель защищён), плоские окна спереди и сзади.
+function acroBody(ctx, k) {
+  const A = 16;
+  const sec = G.shape(G.rrect(0, 14, 30, 28, 5), [G.rrect(0, 16, 20, 17, 3)]);
+  k.add('alu', G.extrudeX(sec, -12, 16, { bevel: 1.4 }));
+  k.add('alu', G.extrudeX(G.rrect(0, 4, 30, 8, 2), -24, 16, { bevel: 1.2 }));
+  k.add('alu', G.extrudeZ([[-24, 7], [-12, 7], [-12, 20], [-18, 19, 3], [-24, 14, 3]], 26, { bevel: 1.4 }));
+  for (const s of [-1, 1]) k.add('rubber', G.T(G.box(6, 5, 1.6, { bevel: 0.6 }), { p: [-18, 12, s * 13.8] }));
+  k.add('steel', G.T(G.cylY(3.4, 1, 2, { seg: 20 }), { p: [-2, -1, 0] }));
+  const glass = lens(ctx, G.extrudeX(G.shape(G.rrect(0, 16, 20, 17, 3)), 12, 13, { bevel: 0.2 }), 'glassBlue');
+  return { A, glass, x0: -12, x1: 16, reticle: 'dot' };
+}
+
+// Holosun HS507C: открытый, как RMR, но с боковым лотком батареи и кнопками под «рогами».
+function hs507Body(ctx, k) {
+  const A = rmrBody(ctx, k);
+  k.add('alu', G.T(G.box(16, 9, 2.2, { bevel: 0.8 }), { p: [-10, 5, 13.3] }));
+  k.add('steel', G.T(G.cylZ(1.5, 14.2, 15, { seg: 10 }), { p: [-15, 5, 0] }));
+  const glass = lens(ctx, G.extrudeX(G.shape(G.rrect(0, A + 0.5, 18.6, 13.4, 5)), 6, 7, { bevel: 0.2 }), 'glassBlue');
+  return { A, glass, x0: -22, x1: 15, reticle: 'cdot' };
+}
+
 function pvs14(ctx) {
   const k = ctx.kit(), f = ctx.kit();
   const A = 39;
@@ -521,6 +577,9 @@ export const OPTICS = [
   { id: 'mag3x', cat: 'magnifier', name: 'Aimpoint 3XMag-1 + FTS', desc: 'Увеличитель 3×, откидывается вбок', foot: [-16, 16], body: [-57, 55], needs: mag1x39, stats: { weight: 330, ergo: -4, adsTime: 20 }, build: magnifier },
   { id: 'pvs14', cat: 'magnifier', name: 'Монокуляр AN/PVS-14', desc: 'ПНВ за коллиматором на откидном кронштейне (N — откинуть)', foot: [-16, 16], body: [-86, 60], needs: mag1x39, stats: { weight: 420, ergo: -6, adsTime: 25 }, build: pvs14 },
   { id: 'rmr_off', cat: 'offset', side: true, name: 'Trijicon RMR на 45° кронштейне', desc: 'Мини-коллиматор сбоку для ближнего боя: V — переключиться, оружие заваливается', foot: [-12, 12], body: [-23, 24], stats: { weight: 95, ergo: -1 }, build: rmrOffset },
+  { id: 'dpp_off', cat: 'offset', side: true, name: 'Leupold DeltaPoint Pro на 45°', desc: 'Наклонный коллиматор с большим окном, точка 2,5 MOA (V — переключиться)', foot: [-13, 13], body: [-24, 25], stats: { weight: 110, ergo: -1 }, build: (c) => cantOptic(c, 'dpp_off', dppBody) },
+  { id: 'acro_off', cat: 'offset', side: true, name: 'Aimpoint ACRO P-2 на 45°', desc: 'Наклонный закрытый коллиматор: излучатель защищён от грязи и воды', foot: [-13, 13], body: [-24, 25], stats: { weight: 120, ergo: -1 }, build: (c) => cantOptic(c, 'acro_off', acroBody) },
+  { id: 'hs507_off', cat: 'offset', side: true, name: 'Holosun HS507C на 45°', desc: 'Наклонный коллиматор: кольцо 32 MOA + точка, боковой лоток батареи', foot: [-13, 13], body: [-24, 25], stats: { weight: 100, ergo: -1 }, build: (c) => cantOptic(c, 'hs507_off', hs507Body) },
   { id: 'mbus_rear', cat: 'rearsight', name: 'Magpul MBUS (целик)', desc: 'Складной диоптр, полимер', foot: [-13, 13], body: [-13, 13], stats: { weight: 34 }, build: mbusRear },
   { id: 'mbus_front', cat: 'frontsight', name: 'Magpul MBUS (мушка)', desc: 'Складная мушка, полимер', foot: [-13, 13], body: [-13, 13], stats: { weight: 26 }, build: mbusFront },
 ];

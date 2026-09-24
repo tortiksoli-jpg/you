@@ -113,6 +113,53 @@ function makeTextures() {
   };
 }
 
+// Износ и неоднородность поверхности (шейдерная надстройка над MeshStandard/Physical):
+//  • потёртости на рёбрах: кривизна поверхности считается по производным нормали
+//    в экранном пространстве, нормированным на размер пикселя в метрах, — не зависит
+//    от расстояния; на фасках и мелких деталях проступает металл / светлый полимер;
+//  • крупные пятна: засаленность, неравномерная матовость и оттенок покрытия
+//    (3D-шум в координатах детали, мм).
+const WEAR_GLSL = `
+varying vec3 vObjP;
+uniform float uWear, uWearMetal, uWearRough, uGrime;
+uniform vec3 uWearCol;
+float wH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float wN(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(wH(i), wH(i + vec3(1, 0, 0)), f.x), mix(wH(i + vec3(0, 1, 0)), wH(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(wH(i + vec3(0, 0, 1)), wH(i + vec3(1, 0, 1)), f.x), mix(wH(i + vec3(0, 1, 1)), wH(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}`;
+function addWear(mat, o) {
+  const U = {
+    uWear: { value: o.wear ?? 0.6 }, uWearMetal: { value: o.metal ?? mat.metalness }, uWearRough: { value: o.rough ?? 0.35 },
+    uGrime: { value: o.grime ?? 1 }, uWearCol: { value: new THREE.Color(o.col ?? 0x8f9296) },
+  };
+  mat.userData.wear = U;
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vObjP;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjP = position;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + WEAR_GLSL)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      {
+        vec3 nn = normalize(vNormal);
+        float px = max(length(fwidth(vViewPosition)), 1e-6);
+        float curv = length(fwidth(nn)) / px;               // 1/м
+        float brk = wN(vObjP * 0.45) * 0.65 + wN(vObjP * 2.1) * 0.35;
+        float edge = smoothstep(170.0, 750.0, curv) * smoothstep(0.3, 0.6, brk);
+        float m = clamp(edge * uWear, 0.0, 1.0);
+        diffuseColor.rgb = mix(diffuseColor.rgb, uWearCol, m);
+        metalnessFactor = mix(metalnessFactor, uWearMetal, m);
+        roughnessFactor = mix(roughnessFactor, uWearRough, m);
+        float g1 = wN(vObjP * 0.018 + 3.1), g2 = wN(vObjP * 0.06 + 11.7);
+        roughnessFactor = clamp(roughnessFactor * mix(1.0, 0.8 + 0.4 * g1, uGrime), 0.04, 1.0);
+        diffuseColor.rgb *= mix(1.0, 0.93 + 0.14 * g2, uGrime);
+      }`);
+  };
+  mat.customProgramCacheKey = () => 'wear';
+  return mat;
+}
+
 export function createMaterials(envMap) {
   const tex = makeTextures();
   const rep = (t, mm) => { const c = t.clone(); c.needsUpdate = true; c.repeat.set(1 / mm, 1 / mm); return c; };
@@ -133,12 +180,12 @@ export function createMaterials(envMap) {
   });
 
   // металл
-  R.steel = metal(0x2b2c2e, 0.42, 0.8);                  // воронёная сталь
+  R.steel = metal(0x2b2c2e, 0.38, 0.82, { ns: 0.18, tile: 18 }); // воронёная сталь
   R.steelPark = metal(0x353536, 0.62, 0.55, { cast: true, ns: 0.5 }); // фосфатирование
   R.steelWorn = metal(0x55565a, 0.36, 0.9, { brushed: true });
   R.steelBright = metal(0xa7a9ad, 0.26, 1.0, { brushed: true });
   R.chrome = metal(0xc9cbce, 0.14, 1.0);
-  R.alu = metal(0x1f2022, 0.46, 0.55, { ns: 0.25 });     // анодированный алюминий
+  R.alu = metal(0x1f2022, 0.44, 0.6, { ns: 0.14, tile: 16 });  // анодированный алюминий
   R.aluGrey = metal(0x3b3d40, 0.44, 0.6, { ns: 0.25 });
   R.aluFde = metal(0x75634a, 0.58, 0.25, { cast: true, ns: 0.35, env: 0.8 });
   R.aluOd = metal(0x4c4b38, 0.6, 0.25, { cast: true });
@@ -183,11 +230,39 @@ export function createMaterials(envMap) {
   R.lampLens = std({ color: 0xdde6ee, emissive: 0xfff3dc, emissiveIntensity: 0, roughness: 0.08, metalness: 0.2 });
   R.laserLens = std({ color: 0x331010, emissive: 0xff2010, emissiveIntensity: 0, roughness: 0.1 });
   R.irLens = std({ color: 0x151515, roughness: 0.05, metalness: 0.4 });
+  // люминофор светодиода: жёлтый кристалл под куполом, светится при включении
+  R.ledPhos = std({ color: 0xcfc07a, emissive: 0xfff3dc, emissiveIntensity: 0, roughness: 0.45 });
+  // отражатель с фактурой «апельсиновая корка» (OP): блики размыты — серебристый, а не чёрное зеркало
+  R.reflector = std({ color: 0xe6e8ec, roughness: 0.22, metalness: 1, emissive: 0xfff3dc, emissiveIntensity: 0, side: THREE.DoubleSide, envMapIntensity: 2.4 });
   R.white = std({ color: 0xe8e6e0, roughness: 0.5 });
   R.paintRed = std({ color: 0xb4241c, roughness: 0.5 });
   R.paintWhite = std({ color: 0xdedbd2, roughness: 0.55 });
   R.paper = std({ color: 0xe9e3d3, roughness: 0.95 });
   R.target = std({ color: 0xcfc8b6, roughness: 0.6, metalness: 0.2 });
+
+  // Износ по материалам: воронение стирается до светлой стали, анодировка — до
+  // серебристого алюминия, песочная краска SCAR — до тёмного металла, полимер — светлеет.
+  const W = {
+    steel: { col: 0x8e9398, metal: 1, rough: 0.3, wear: 0.75 },
+    steelPark: { col: 0x6c6e71, metal: 0.9, rough: 0.38, wear: 0.55 },
+    steelWorn: { col: 0xa9adb2, metal: 1, rough: 0.28, wear: 0.5 },
+    alu: { col: 0x8b8e94, metal: 1, rough: 0.3, wear: 0.4 },
+    aluGrey: { col: 0x9a9da2, metal: 1, rough: 0.3, wear: 0.4 },
+    aluFde: { col: 0x8f8c86, metal: 0.95, rough: 0.35, wear: 0.45 },
+    aluOd: { col: 0x8f8c86, metal: 0.95, rough: 0.35, wear: 0.45 },
+    cast: { col: 0x7d7f82, metal: 0.95, rough: 0.35, wear: 0.35 },
+    poly: { col: 0x3a3a3c, metal: 0, rough: 0.5, wear: 0.55 },
+    polySoft: { col: 0x3a3a3c, metal: 0, rough: 0.6, wear: 0.35 },
+    polyFde: { col: 0xa89272, metal: 0, rough: 0.55, wear: 0.5 },
+    polyFdeDark: { col: 0x7c6b52, metal: 0, rough: 0.55, wear: 0.5 },
+    polyTan: { col: 0xb6a27f, metal: 0, rough: 0.55, wear: 0.5 },
+    polyOd: { col: 0x6a6a52, metal: 0, rough: 0.55, wear: 0.5 },
+    polyGrey: { col: 0x626468, metal: 0, rough: 0.55, wear: 0.5 },
+    polyPlum: { col: 0x6e3c30, metal: 0, rough: 0.4, wear: 0.45 },
+    bakelite: { col: 0x8a4a2a, metal: 0, rough: 0.35, wear: 0.4 },
+    rubber: { col: 0x2e2e2f, metal: 0, rough: 0.7, wear: 0.2, grime: 0.6 },
+  };
+  for (const [k, o] of Object.entries(W)) if (R[k]) addWear(R[k], o);
 
   const cache = new Map();
   return {
@@ -202,6 +277,7 @@ export function createMaterials(envMap) {
       if (R[base] && col) {
         const m = R[base].clone();
         m.color = new THREE.Color('#' + col);
+        if (W[base]) addWear(m, W[base]);
         cache.set(key, m);
         return m;
       }
